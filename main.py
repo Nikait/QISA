@@ -1,78 +1,66 @@
 import hydra
 import logging
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
+import os
 
 import torch
-from torch import Tensor
-import torch.nn.functional as F
+from torch import nn
+from torch import Tensor, tensor
 import torch.optim as optim
 import torchquantum as tq
 
-import tensorflow_datasets as tfds
 
-from dataset import Data
-from model import TextClassifier
+from dataset import TextDataset
+from model import GPT
 from conf.config import Config
 
 
+
 def train_epoch(
-        data, model, device, optimizer, n_qubits, n_features, 
-        best_test_score
-    ) -> float:
+        loader: torch.utils.data.DataLoader, 
+        model: nn.Module, 
+        criterion: nn.Module, 
+        optimizer: optim.Optimizer,
+        device: str
+    ) -> tensor:
 
-    for i, (x, y) in enumerate(data["train"]):
+    losses = torch.zeros(len(loader))
+
+    for i, (x, y) in enumerate(loader):
         optimizer.zero_grad()
-
-        if i % (len(data["train"]) // 10) == 0:
-            length = len(data["train"])
-            logging.info(f"[**] Testing start it {i:>4}/{length}")
-
-            best_test_score = test_data(
-                data, model, device, optimizer, n_qubits, n_features,
-                best_test_score=best_test_score
-            )
-
-        optimizer.zero_grad()
-
-        inputs = x.to(device)
-        targets = y.to(device).to(torch.float)
-
-        out = model(inputs) 
-        loss = F.mse_loss(out, targets)
+        x.to(device); y.to(device)
+        logits = model(x)
+        loss = criterion(logits, y.view(-1,))
+        losses[i] = loss.item()
+        print(i, loss.item())
         loss.backward()
         optimizer.step()
-    
-    return best_test_score
+
+    info = torch.mean(losses)
+
+    return info
 
 
 @torch.inference_mode()
-def test_data(
-        data, model, device,
-    ) -> float:
-    
-    overall_target, overall_out = [], []
+def test_epoch(
+        loader: torch.utils.data.DataLoader, 
+        model: nn.Module, 
+        criterion: nn.Module, 
+        optimizer: optim.Optimizer,
+        device: str
+    ) -> tensor:
 
-    for x, y in data['test']:
-        inputs = x.to(device)
-        targets = y.to(device).to(torch.float)
+    losses = torch.zeros(len(loader))
 
-        out = model(inputs)
+    for i, (x, y) in enumerate(loader):
+        optimizer.zero_grad()
+        x.to(device); y.to(device)
+        logits = model(x)
+        loss = criterion(logits, y.view(-1,))
+        losses[i] = loss.item()
 
-        overall_target.append(targets)
-        overall_out.append(out)
+    info = torch.mean(losses)
 
-    overall_target = torch.cat(overall_target, dim=0)
-    overall_out = torch.cat(overall_out, dim=0)
-
-
-    loss = torch.sqrt(F.mse_loss(
-        torch.from_numpy(overall_target), torch.from_numpy(overall_out)
-    ))
-
-    logging.info(f"[**] Test loss: {loss:.5f}\n")
-
+    return info
 
 
 
@@ -152,74 +140,75 @@ example = Tensor(
 def main(cfg: Config):
     logging.basicConfig(level=logging.INFO)
 
-    # TODO: Prepare features and dataset
 
-    
-    # train_data, validation_data, test_data = tfds.load(
-    #     name="imdb_reviews",
-    #     split=('train[:60%]', 'train[60%:]', 'test'),
-    #     as_supervised=True
-    # )
-
-
-    # train = Data(str, ytr)
-    # test = Data(xt, yt)
-
-
-    # torch_dataset = {
-    #     "train": torch.utils.data.DataLoader(
-    #         train,
-    #         batch_size=cfg.train.bsz,
-    #         shuffle=True
-    #     ),
-    #     "test": torch.utils.data.DataLoader(
-    #         test,
-    #         batch_size=cfg.train.bsz,
-    #         shuffle=True
-    #     )
-    # }
-
-
-    # >>> Setting configs, optimizer, etc
-
+    # >>> Setting configs, device, etc
+    os.makedirs(cfg.data.checkpoints, exist_ok=True)
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     logging.info(f"Device for training: {device}")
 
- 
-    model = TextClassifier(
-        example.shape[1], 2, 1
+
+    # >>> Preparing the dataset
+    with open(cfg.data.data_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    characters = sorted(list(set(text)))
+    train_size = int(len(text) * cfg.data.train)
+
+    train_text = text[:train_size]
+    test_text = text[train_size:]
+    
+    train_set = TextDataset(train_text, characters, cfg.data.block_size, train=True)
+    test_set = TextDataset(test_text, characters, cfg.data.block_size, train=False)
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_set, batch_size=cfg.train.bsz, shuffle=True
+    )
+    test_dataloader = torch.utils.data.DataLoader(
+        test_set, batch_size=cfg.train.bsz, shuffle=False
+    )
+
+
+    # >>> Setting the model
+    model = GPT(
+        len(characters), 
+        cfg.data.block_size, 
+        cfg.train.n_embd, 
+        cfg.train.n_head, 
+        cfg.train.n_layer
     ).to(device)
 
-    ## print parameters just for a look
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name, param.data)
+    # loading checkpoint if provided
+    if cfg.data.load_checkpoint:
+        model.load_state_dict(torch.load(cfg.data.load_checkpoint_path))
 
-    print("input shape: ", example.shape)
-    print("model output: ", model(example))
+    criterion = nn.CrossEntropyLoss().to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr)
 
-    # optimizer = optim.Adam(model.parameters(), lr=cfg.train.lr)
-    
-    # ## loading weights from checkpoint (any proper .pt file)
-    # #model.load_state_dict(torch.load('weights3/model_overall=False_0.5565.pt'))
-    
 
-    # # >>> Training
+    best_loss = 1e5
+    for epoch in range(1, cfg.train.n_epoch+1):
+        mean_loss = train_epoch(
+            train_dataloader, model, criterion, optimizer, device
+        )
+        logging.info(f"Epoch: {epoch}, train loss: {mean_loss:.2f}")
+        
+        # testing
+        mean_loss = test_epoch(
+            test_dataloader, model, criterion, optimizer, device
+        )
+        logging.info(f"Epoch: {epoch}, train loss: {mean_loss:.2f}")
 
-    # for epoch in range(1, cfg.train.n_epoch+1):
-    #     logging.info(f"[***] Epoch {epoch:>2}\n")
+        # save checkpoint
+        if best_loss > mean_loss:
+            torch.save(
+                model.state_dict(), 
+                cfg.data.checkpoints + "model_epoch_{}_loss_{:.2f}.pt".format(epoch, mean_loss)
+            )
+            best_loss = mean_loss
 
-    #     best_test_score = train_epoch(
-    #         torch_dataset, 
-    #         model, 
-    #         device, 
-    #         optimizer, 
-    #         used_qubits, 
-    #         n_features=train.n_features, 
-    #     )
-
+        
 
 if __name__ == "__main__":
     main()
