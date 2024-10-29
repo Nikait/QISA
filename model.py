@@ -1,195 +1,143 @@
-import random
-import torchquantum as tq
-import torchquantum.functional as tqf
-from torchquantum.measurement import expval_joint_analytical
 import torch
-
-from torch import nn
-from torch import Tensor
+import torch.nn as nn
 import torch.nn.functional as F
 
-class QSANN(tq.QuantumModule):
-    class QueryKeyLayer(tq.QuantumModule):
-        def __init__(self, n_wires: int):
-            super().__init__()
-            self.n_wires = n_wires
+"""
+Actual source:
+https://github.com/karpathy/nanoGPT
+"""
 
-            self.encoding = tq.AmplitudeEncoder()
-            self.measure = tq.MeasureAll(tq.PauliZ)
-            # gates with trainable parameters
-            self.rx0 = tq.QuantumModuleList(
-                [tq.RX(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry0 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry1 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
+class TransformerBlock(nn.Module):
+    def __init__(
+            self, 
+            num_heads: int, 
+            n_embed: int, 
+            block_size: int
+        ):
+        super(TransformerBlock, self).__init__()
+        hidden_dim = n_embed // num_heads
+        self.mhsa = MultiHeadSelfAttention(num_heads, hidden_dim, n_embed, block_size)
+        self.feed_forward = FeedForward(n_embed)
+        self.norm1 = nn.LayerNorm(n_embed)
+        self.norm2 = nn.LayerNorm(n_embed)
 
-        def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
-            """
-            input: (B,C)
-            otput: (B,)
-            """
-            x = self.encoding(qdev, x)
-
-            for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
-                rx(qdev, wires=j)
-                ry(qdev, wires=j)
-            
-            for j in range(self.n_wires):
-                for j in range(self.n_wires):
-                    tqf.cnot(qdev, wires=[j, (j+1) % self.n_wires])
-
-                for j, ry in enumerate(self.ry1):
-                    ry(qdev, wires=j)
-            
-            out = tq.expval(qdev, 0, tq.PauliZ())
-
-            return out
-
-     
-    class ValueLayer(tq.QuantumModule):
-        def __init__(self, n_wires: int):
-            super().__init__()
-            self.n_wires = n_wires
-
-            self.encoding = tq.AmplitudeEncoder()
-            # gates with trainable parameters
-            self.rx0 = tq.QuantumModuleList(
-                [tq.RX(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry0 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry1 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-
-        def choose_op(self):
-            a = random.randint(0, 3)
-            op_s = 'IXYZ'
-            op = op_s[a]
-
-            op_elimated='I'
-            for _ in range(1,self.n_wires):
-                op_elimated=op_elimated+'I'
-
-            Select_wrong=True
-            while Select_wrong:
-                for i in range(1,self.n_wires):
-                    a = random.randint(0, 3)
-                    op += op_s[a]
-                if op!=op_elimated:
-                    Select_wrong=False
-            return op
-
-        def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
-            """
-            input: (B,C)
-            otput: (B,C)
-            """
-
-            x = self.encoding(qdev, x)
-            op = self.choose_op()[:self.n_wires]
-            
-            for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
-                rx(qdev, wires=j)
-                ry(qdev, wires=j)
-            
-            for j in range(self.n_wires):
-                for j in range(self.n_wires):
-                    tqf.cnot(qdev, wires=[j, (j+1) % self.n_wires])
-
-                for j, ry in enumerate(self.ry1):
-                    ry(qdev, wires=j)
-            
-
-            measurements = [expval_joint_analytical(qdev, op) for i in range(1 << self.n_wires)]
-            out = torch.stack(measurements, dim=-1)
-
-            return out
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.mhsa(self.norm1(x))
+        x = x + self.feed_forward(self.norm2(x))
+        return x
 
 
-    def __init__(self, n_context: int, n_wires: int, n_var_layers: int) -> None:
-        super().__init__()
-        self.n_context = n_context
-        self.n_wires = n_wires
-        self.n_states = 1 << n_wires
-        self.n_var_layers = n_var_layers
-        self.encoder = tq.AmplitudeEncoder()
-        
-        self.k = tq.QuantumModuleList(
-            [self.QueryKeyLayer(self.n_wires) for _ in range(self.n_context)]
+class FeedForward(nn.Module):
+    def __init__(
+            self, 
+            n_embed: int, 
+            extend_width: int=4, 
+            dropout: float=0.2
+        ):
+        super(FeedForward, self).__init__()
+        self.layer = nn.Sequential(
+            nn.Linear(n_embed, extend_width*n_embed), 
+            nn.ReLU(),
+            nn.Linear(extend_width*n_embed, n_embed), 
+            nn.Dropout(dropout)
         )
-        self.q = tq.QuantumModuleList(
-            [self.QueryKeyLayer(self.n_wires) for _ in range(self.n_context)]
-        )
-        self.v = tq.QuantumModuleList(
-            [self.ValueLayer(self.n_wires) for _ in range(self.n_context)]
-        )
-
-        self.measure = tq.MeasureAll(tq.PauliZ)
-        self.fc = torch.nn.Linear(self.n_wires, 1)
-   
-
-    def forward(self, x: Tensor) -> Tensor:
-        """
-        x: (B,T,C) - input states
-        returns: (B,T,C)
-        """
-        qdev = tq.QuantumDevice(
-            n_wires=self.n_wires, bsz=x.shape[0], device=x.device
-        )
-
-        Q_output = torch.stack([self.q[i](x[:,i], qdev) for i in range(self.n_context)])
-        K_output = torch.stack([self.k[i](x[:,i], qdev) for i in range(self.n_context)])
-        V_output = torch.stack([self.v[i](x[:,i], qdev) for i in range(self.n_context)])
-
-        Q_output = Q_output.transpose(0,2).repeat((self.n_context, 1, 1))
-        K_output = K_output.transpose(0,2).repeat((self.n_context, 1, 1)).transpose(0, 2)
-        
-        alpha=torch.exp(-(Q_output-K_output)**2)
-        alpha=alpha.transpose(0,1)
-        V_output=V_output.transpose(0,1)
-        output=[]
-
-        for i in range(self.n_context):
-            Sum_a=torch.sum(alpha[:,i,:],-1)
-            div_sum_a=(1/Sum_a).repeat(self.n_states, self.n_context,1).transpose(0,2)
-
-            Sum_w=torch.sum(alpha[:,:,i].repeat((self.n_states,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
-            output.append(Sum_w)
-
-        out = x + torch.stack(output).transpose(0,1)
-
-        return out
-
-
-
-
-
-class TextClassifier(torch.nn.Module):
-    def __init__(self, n_context, n_wires, n_var_layers):
-        """
-        n_context: the number of words
-        n_wires: the number of qubits
-        n_var_layers: the number of variational layers
-
-        NOTE: the embedding dim is equal to n*(n_dec_layers+2), where
-        n_dec_layers is the number of layers for encoding 
-        """
-        super().__init__()
-        # self.embedding = nn.Embedding(n_vocab, embed, padding_idx=n_vocab - 1)
-        self.QNN = QSANN(n_context, n_wires, n_var_layers)
-        self.fc_layer = nn.Linear((1 << n_wires) * n_context, 1)
-
-
-    def forward(self, x):
-        x = self.QNN(x)
-        x = torch.flatten(x, start_dim=1)
-        out = torch.sigmoid(self.fc_layer(x))
-
-        return out
     
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layer(x)
+
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(
+            self, 
+            num_heads: int, 
+            hidden_dim: int, 
+            n_embed: int, 
+            block_size: int, 
+            dropout: float=0.2
+        ):
+        super(MultiHeadSelfAttention, self).__init__()
+        self.num_heads = num_heads
+        self.heads = nn.ModuleList([SingleHead(hidden_dim, n_embed, block_size) for _ in range(self.num_heads)])
+        self.project = nn.Linear(n_embed, n_embed)
+        self.drop = nn.Dropout(dropout)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = torch.cat([sh(x) for sh in self.heads], dim=-1)
+        out = self.project(out)
+        out = self.drop(out)
+        return out
+
+
+class SingleHead(nn.Module):
+    def __init__(
+            self, 
+            hidden_dim: int, 
+            n_embed: int, 
+            block_size: int, 
+            dropout: float=0.2
+        ):
+        super(SingleHead, self).__init__()
+        self.key = nn.Linear(n_embed, hidden_dim, bias=False)
+        self.query = nn.Linear(n_embed, hidden_dim, bias=False)
+        self.value = nn.Linear(n_embed, hidden_dim, bias=False)
+        self.drop = nn.Dropout(dropout)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.shape
+        k = self.key(x)
+        q = self.query(x)
+        weights = q @ k.transpose(-2, -1) * C**(-0.5)
+        masked_weights = weights.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
+        masked_probs = F.softmax(masked_weights, dim=-1)
+        masked_probs = self.drop(masked_probs)
+        v = self.value(x)
+        out = masked_probs @ v
+        return out
+
+
+class GPT(nn.Module):
+    def __init__(
+            self, 
+            vocab_size: int, 
+            block_size: int, 
+            n_embed: int, 
+            num_heads: int, 
+            n_layers: int
+        ):
+        super(GPT, self).__init__()
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        self.embedding = nn.Embedding(vocab_size, n_embed)
+        self.positional_embedding_table = nn.Embedding(block_size, n_embed)
+        self.blocks = nn.Sequential(
+            *[TransformerBlock(num_heads, n_embed, block_size) for _ in range(n_layers)],
+        )
+        self.norm = nn.LayerNorm(n_embed)        
+        self.fc = nn.Linear(n_embed, vocab_size)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        token_embeddings = self.embedding(x) # B, T -> B, T, N_EMB
+        positional_embedding = self.positional_embedding_table(torch.arange(T, device=x.device)) # T -> T, C
+        token_embeddings = token_embeddings + positional_embedding # B, T, C + T, C -> B, T, C
+        blocks_out = self.blocks(token_embeddings)
+        blocks_out = self.norm(blocks_out)
+        logits = self.fc(blocks_out) # B, T, N_EMB -> B, T, C
+        logits = logits.reshape(B*T, self.vocab_size)
+        return logits
+
+    def generate(self, idx: torch.Tensor, max_tokens: int) -> torch.Tensor:
+        t = idx.shape[1]
+        for _ in range(max_tokens):
+            idx_cond = idx[:, -self.block_size:]
+            logits = self.forward(idx_cond)
+            logits = logits.reshape(1, t, -1)
+            logits = logits[:, -1, :]
+            probs = F.softmax(logits, dim=1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+            if t < self.block_size:
+                t += 1
+        return idx
+
