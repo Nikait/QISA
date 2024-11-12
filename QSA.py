@@ -8,6 +8,8 @@ from torch import nn
 from torch import Tensor
 import torch.nn.functional as F
 
+
+
 class QSA(tq.QuantumModule):
     class QueryKeyLayer(tq.QuantumModule):
         def __init__(self, n_wires: int):
@@ -27,12 +29,17 @@ class QSA(tq.QuantumModule):
                 [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
             )
 
+
         def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
             """
             input: (B,C)
             otput: (B,)
             """
             x = self.encoding(qdev, x)
+            base_states = torch.zeros_like(qdev.get_states_1d())
+            base_states[:, 0] = 1.0
+
+            qdev.set_states(base_states)
 
             for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
                 rx(qdev, wires=j)
@@ -49,11 +56,13 @@ class QSA(tq.QuantumModule):
 
             return out
 
-     
+
     class ValueLayer(tq.QuantumModule):
-        def __init__(self, n_wires: int):
+        def __init__(self, n_wires: int, ops: list[str], hidden_dim: int):
             super().__init__()
+            self.hidden_dim = hidden_dim
             self.n_wires = n_wires
+            self.ops = ops
 
             self.encoding = tq.AmplitudeEncoder()
             # gates with trainable parameters
@@ -67,33 +76,20 @@ class QSA(tq.QuantumModule):
                 [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
             )
 
-        def choose_op(self):
-            a = random.randint(0, 3)
-            op_s = 'IXYZ'
-            op = op_s[a]
-
-            op_elimated='I'
-            for _ in range(1,self.n_wires):
-                op_elimated=op_elimated+'I'
-
-            Select_wrong=True
-            while Select_wrong:
-                for i in range(1,self.n_wires):
-                    a = random.randint(0, 3)
-                    op += op_s[a]
-                if op!=op_elimated:
-                    Select_wrong=False
-            return op
+        
 
         def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
             """
             input: (B,C)
             otput: (B,C)
             """
+            base_states = torch.zeros_like(qdev.get_states_1d())
+            base_states[:, 0] = 1.0
+
+            qdev.set_states(base_states)
 
             x = self.encoding(qdev, x)
-            op = self.choose_op()[:self.n_wires]
-            
+
             for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
                 rx(qdev, wires=j)
                 ry(qdev, wires=j)
@@ -106,18 +102,39 @@ class QSA(tq.QuantumModule):
                     ry(qdev, wires=j)
             
 
-            measurements = [expval_joint_analytical(qdev, op) for i in range(1 << self.n_wires)]
+            measurements = [expval_joint_analytical(qdev, self.ops[i]) for i in range(self.hidden_dim)]
             out = torch.stack(measurements, dim=-1)
 
             return out
 
+    def choose_op(self):
+            a = random.randint(0, 3)
+            op_s = 'IXYZ'
+            op = op_s[a]
 
-    def __init__(self, n_context: int, n_wires: int, n_var_layers: int) -> None:
+            op_elimated='I'
+            for _ in range(1,self.n_wires):
+                op_elimated = op_elimated + 'I'
+
+            Select_wrong = True
+            while Select_wrong:
+                for _ in range(1,self.n_wires):
+                    a = random.randint(0, 3)
+                    op += op_s[a]
+                if op != op_elimated:
+                    Select_wrong = False
+
+            return op
+    
+    def __init__(self, n_context: int, n_wires: int, hidden_dim: int) -> None:
         super().__init__()
+        self.hidden_dim = hidden_dim
         self.n_context = n_context
         self.n_wires = n_wires
         self.n_states = 1 << n_wires
-        self.n_var_layers = n_var_layers
+        
+        self.ops = [self.choose_op()[:self.n_wires] for _ in range(1 << self.hidden_dim)]
+
         self.encoder = tq.AmplitudeEncoder()
         
         self.k = tq.QuantumModuleList(
@@ -127,7 +144,7 @@ class QSA(tq.QuantumModule):
             [self.QueryKeyLayer(self.n_wires) for _ in range(self.n_context)]
         )
         self.v = tq.QuantumModuleList(
-            [self.ValueLayer(self.n_wires) for _ in range(self.n_context)]
+            [self.ValueLayer(self.n_wires, self.ops, self.hidden_dim) for _ in range(self.n_context)]
         )
 
         self.measure = tq.MeasureAll(tq.PauliZ)
@@ -142,26 +159,27 @@ class QSA(tq.QuantumModule):
         qdev = tq.QuantumDevice(
             n_wires=self.n_wires, bsz=x.shape[0], device=x.device
         )
+        
+        Q_output = torch.stack([self.q[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
+        K_output = torch.stack([self.k[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
+        V_output = torch.stack([self.v[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
 
-        Q_output = torch.stack([self.q[i](x[:,i], qdev) for i in range(self.n_context)])
-        K_output = torch.stack([self.k[i](x[:,i], qdev) for i in range(self.n_context)])
-        V_output = torch.stack([self.v[i](x[:,i], qdev) for i in range(self.n_context)])
 
-        Q_output = Q_output.transpose(0,2).repeat((self.n_context, 1, 1))
-        K_output = K_output.transpose(0,2).repeat((self.n_context, 1, 1)).transpose(0, 2)
+        Q_output = Q_output.repeat((1, 1, self.n_context))
+        K_output = K_output.repeat((1, 1, self.n_context))
         
         alpha=torch.exp(-(Q_output-K_output)**2)
-        alpha=alpha.transpose(0,1)
-        V_output=V_output.transpose(0,1)
-        output=[]
+        
+        output = []
 
         for i in range(self.n_context):
             Sum_a=torch.sum(alpha[:,i,:],-1)
-            div_sum_a=(1/Sum_a).repeat(self.n_states, self.n_context,1).transpose(0,2)
+            div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
 
-            Sum_w=torch.sum(alpha[:,:,i].repeat((self.n_states,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
+            Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
             output.append(Sum_w)
 
-        out = x + torch.stack(output).transpose(0,1)
+        out = x + torch.stack(output).transpose(0,1) ## Should we summ with ??
 
         return out
+
