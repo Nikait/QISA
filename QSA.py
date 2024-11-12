@@ -153,8 +153,8 @@ class QSA(tq.QuantumModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """
-        x: (B,T,C) - input states
-        returns: (B,T,C)
+        x: (B,T,embed_size) - input states
+        returns: (B,T,hidden_size)
         """
         qdev = tq.QuantumDevice(
             n_wires=self.n_wires, bsz=x.shape[0], device=x.device
@@ -179,7 +179,7 @@ class QSA(tq.QuantumModule):
             Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
             output.append(Sum_w)
 
-        out = x + torch.stack(output).transpose(0,1) ## Should we summ with ??
+        out = x + torch.stack(output).transpose(0,1) ## Should we sum with x??
 
         return out
 
