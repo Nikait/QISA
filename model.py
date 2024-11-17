@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 from QSA import QSA
+
+
 """
 Actual source:
 https://github.com/karpathy/nanoGPT
@@ -79,7 +80,7 @@ class SingleHead(nn.Module):
             dropout: float=0.2
         ):
         super(SingleHead, self).__init__()
-        self.qsa = QSA(block_size, 2, hidden_dim)
+        self.qsa = QSA(n_embed, block_size, hidden_dim)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.qsa(x)
