@@ -101,7 +101,6 @@ class QSA(tq.QuantumModule):
                 for j, ry in enumerate(self.ry1):
                     ry(qdev, wires=j)
             
-
             measurements = [expval_joint_analytical(qdev, self.ops[i]) for i in range(self.hidden_dim)]
             out = torch.stack(measurements, dim=-1)
 
@@ -132,6 +131,7 @@ class QSA(tq.QuantumModule):
         self.n_context = n_context
         self.n_wires = n_wires
         self.n_states = 1 << n_wires
+        self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
         
         self.ops = [self.choose_op()[:self.n_wires] for _ in range(1 << self.hidden_dim)]
 
@@ -156,6 +156,7 @@ class QSA(tq.QuantumModule):
         x: (B,T,embed_size) - input states
         returns: (B,T,hidden_size)
         """
+        
         qdev = tq.QuantumDevice(
             n_wires=self.n_wires, bsz=x.shape[0], device=x.device
         )
@@ -168,7 +169,8 @@ class QSA(tq.QuantumModule):
         Q_output = Q_output.repeat((1, 1, self.n_context))
         K_output = K_output.repeat((1, 1, self.n_context))
         
-        alpha=torch.exp(-(Q_output-K_output)**2)
+        alpha = torch.exp(-(Q_output-K_output)**2)
+        alpha.masked_fill(self.tril == 0, 0)
         
         output = []
 
@@ -179,7 +181,6 @@ class QSA(tq.QuantumModule):
             Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
             output.append(Sum_w)
 
-        out = x + torch.stack(output).transpose(0,1) ## Should we sum with x??
+        out = torch.stack(output).transpose(0,1) ## Should we sum with x??
 
         return out
-
