@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+from QSA import QSA
 """
 Actual source:
 https://github.com/karpathy/nanoGPT
@@ -77,22 +79,10 @@ class SingleHead(nn.Module):
             dropout: float=0.2
         ):
         super(SingleHead, self).__init__()
-        self.key = nn.Linear(n_embed, hidden_dim, bias=False)
-        self.query = nn.Linear(n_embed, hidden_dim, bias=False)
-        self.value = nn.Linear(n_embed, hidden_dim, bias=False)
-        self.drop = nn.Dropout(dropout)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+        self.qsa = QSA(block_size, 2, hidden_dim)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, C = x.shape
-        k = self.key(x)
-        q = self.query(x)
-        weights = q @ k.transpose(-2, -1) * C**(-0.5)
-        masked_weights = weights.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
-        masked_probs = F.softmax(masked_weights, dim=-1)
-        masked_probs = self.drop(masked_probs)
-        v = self.value(x)
-        out = masked_probs @ v
+        out = self.qsa(x)
         return out
 
 
@@ -140,4 +130,3 @@ class GPT(nn.Module):
             if t < self.block_size:
                 t += 1
         return idx
-
