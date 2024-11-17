@@ -3,6 +3,7 @@ import torchquantum as tq
 import torchquantum.functional as tqf
 from torchquantum.measurement import expval_joint_analytical
 import torch
+import numpy as np
 
 from torch import nn
 from torch import Tensor
@@ -125,12 +126,12 @@ class QSA(tq.QuantumModule):
 
             return op
     
-    def __init__(self, n_context: int, n_wires: int, hidden_dim: int) -> None:
+    def __init__(self, n_embed: int, n_context: int, hidden_dim: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.n_context = n_context
-        self.n_wires = n_wires
-        self.n_states = 1 << n_wires
+        self.n_wires = np.ceil(np.log2(n_embed))
+        self.n_states = 1 << self.n_wires
         self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
         
         self.ops = [self.choose_op()[:self.n_wires] for _ in range(1 << self.hidden_dim)]
