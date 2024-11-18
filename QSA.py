@@ -108,29 +108,29 @@ class QSA(tq.QuantumModule):
             return out
 
     def choose_op(self):
-            a = random.randint(0, 3)
-            op_s = 'IXYZ'
-            op = op_s[a]
+        a = random.randint(0, 3)
+        op_s = 'IXYZ'
+        op = op_s[a]
 
-            op_elimated='I'
+        op_elimated='I'
+        for _ in range(1,self.n_wires):
+            op_elimated = op_elimated + 'I'
+
+        Select_wrong = True
+        while Select_wrong:
             for _ in range(1,self.n_wires):
-                op_elimated = op_elimated + 'I'
+                a = random.randint(0, 3)
+                op += op_s[a]
+            if op != op_elimated:
+                Select_wrong = False
 
-            Select_wrong = True
-            while Select_wrong:
-                for _ in range(1,self.n_wires):
-                    a = random.randint(0, 3)
-                    op += op_s[a]
-                if op != op_elimated:
-                    Select_wrong = False
-
-            return op
+        return op
     
     def __init__(self, n_embed: int, n_context: int, hidden_dim: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
         self.n_context = n_context
-        self.n_wires = np.ceil(np.log2(n_embed))
+        self.n_wires = int(np.ceil(np.log2(n_embed)))
         self.n_states = 1 << self.n_wires
         self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
         
