@@ -5,14 +5,14 @@ from hydra.core.config_store import ConfigStore
 
 @dataclass
 class Train:
-    bsz: int = 25
+    bsz: int = 1024
     lr: float = 3e-3
     n_epoch: int = 30
 
     block_size: int = 16 # context length
     n_embd: int = 4
-    # hidden_dim = n_embed // num_heads --> 4
     n_head: int = 1
+    # hidden_dim = n_embed // num_heads --> 4
     n_layer: int = 6
     dropout: float = 0.2
 
