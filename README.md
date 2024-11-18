@@ -1,3 +1,3 @@
 # QSA
 
-![alt text](assets/plot.png "Training with quantum self-attention")
+![alt text](assets/qsa_vs_csa.png "Training with quantum self-attention")
