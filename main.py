@@ -13,6 +13,7 @@ from model import GPT
 from conf.config import Config
 
 
+
 def train_epoch(
         loader: torch.utils.data.DataLoader, 
         model: nn.Module, 
@@ -28,7 +29,10 @@ def train_epoch(
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
-        print(i, loss.item())
+        
+        if i % 5 == 0:
+            print(i, losses.tolist()[:i+1])
+
         loss.backward()
         optimizer.step()
 
@@ -53,6 +57,8 @@ def test_epoch(
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
+        if i % 5 == 0:
+            print(i, loss.item())
 
     info = torch.mean(losses)
 
@@ -80,8 +86,11 @@ def main(cfg: Config):
     train_text = text[:train_size]
     test_text = text[train_size:]
     
-    train_set = TextDataset(train_text, characters, cfg.data.block_size, train=True)
-    test_set = TextDataset(test_text, characters, cfg.data.block_size, train=False)
+    train_set = TextDataset(train_text, characters, cfg.train.block_size, train=True)
+    test_set = TextDataset(test_text, characters, cfg.train.block_size, train=False)
+    
+    print("Train size: ", len(train_set))
+    print("Test size: ", len(test_set))
 
     train_dataloader = torch.utils.data.DataLoader(
         train_set, batch_size=cfg.train.bsz, shuffle=True
@@ -93,7 +102,7 @@ def main(cfg: Config):
     # >>> Setting the model
     model = GPT(
         len(characters), 
-        cfg.data.block_size, 
+        cfg.train.block_size, 
         cfg.train.n_embd, 
         cfg.train.n_head, 
         cfg.train.n_layer
@@ -108,6 +117,8 @@ def main(cfg: Config):
 
     best_loss = 1e5
     for epoch in range(1, cfg.train.n_epoch+1):
+        logging.info(f"Current epoch: {epoch}")
+        
         mean_loss = train_epoch(
             train_dataloader, model, criterion, optimizer, device
         )
