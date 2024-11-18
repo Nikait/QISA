@@ -21,25 +21,26 @@ class TextDataset(torch.utils.data.Dataset):
         self.block_size = block_size
         self.train = train
 
-        stoi = {s:i for i,s in enumerate(self.characters)}
-        itos = {i:s for i,s in enumerate(self.characters)}
+        self.stoi = {s:i for i,s in enumerate(self.characters)}
+        self.itos = {i:s for i,s in enumerate(self.characters)}
 
-        self.enc = lambda s: [stoi[c] for c in s]
-        self.dec = lambda l: ''.join([itos[i] for i in l])
+        self.enc = lambda s: [self.stoi[c] for c in s]
+        self.dec = lambda l: ''.join([self.itos[i] for i in l])
+
         self.data = tensor(self.enc(self.text), dtype=torch.long)
 
-
-    def __getitem__(self, index: int) -> Dict[str, Union[Tensor, str]]:
-        idx = index # torch.randint(len(self.data) - self.block_size, size=(1,))
+        chunk_len = int(len(self.data) * 0.8)
         if self.train:
-            idx = torch.randint(len(self.data) - self.block_size, size=(1,))
-        
-        X = self.data[idx:idx + self.block_size]
-        y = self.data[idx+1 : idx+self.block_size+1]
+            self.data = self.data[:chunk_len]
+        else:
+            self.data = self.data[chunk_len:]
 
-        return (X, y)
+    def __getitem__(self, idx):
+        # grab a chunk of (block_size + 1) characters from the data
+        chunk = self.data[idx:idx + self.block_size + 1]
+        x = chunk[:-1]
+        y = chunk[1:]
+        return x, y
 
     def __len__(self) -> int:
-        if self.train:
-            return 5000
         return len(self.data) - self.block_size
