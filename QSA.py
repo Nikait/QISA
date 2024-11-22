@@ -133,7 +133,8 @@ class QSA(tq.QuantumModule):
         self.n_wires = int(np.ceil(np.log2(n_embed)))
         self.n_states = 1 << self.n_wires
         self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
-        
+        self.drop = nn.Dropout(0.2)
+
         self.ops = [self.choose_op()[:self.n_wires] for _ in range(1 << self.hidden_dim)]
 
         self.encoder = tq.AmplitudeEncoder()
@@ -166,22 +167,15 @@ class QSA(tq.QuantumModule):
         K_output = torch.stack([self.k[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
         V_output = torch.stack([self.v[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
 
-
         Q_output = Q_output.repeat((1, 1, self.n_context))
         K_output = K_output.repeat((1, 1, self.n_context))
         
-        alpha = torch.exp(-(Q_output-K_output)**2)
-        alpha.masked_fill(self.tril == 0, 0)
         
+        alpha = torch.exp(-(Q_output-K_output)**2) * (self.hidden_dim**(-0.5))
+        alpha = alpha.masked_fill(self.tril == 0,  float("-inf"))
+        masked_probs = F.softmax(alpha, dim=-1)
+        masked_probs = self.drop(masked_probs)
+        out = masked_probs @ V_output
         output = []
-
-        for i in range(self.n_context):
-            Sum_a=torch.sum(alpha[:,i,:],-1)
-            div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
-
-            Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
-            output.append(Sum_w)
-
-        out = torch.stack(output).transpose(0,1) ## Should we sum with x??
 
         return out
