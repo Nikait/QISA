@@ -10,9 +10,9 @@ class Train:
     n_epoch: int = 30
 
     block_size: int = 16 # context length
-    n_embd: int = 4
-    n_head: int = 1
+    n_embd: int = 16
     # hidden_dim = n_embed // num_heads --> 4
+    n_head: int = 1
     n_layer: int = 6
     dropout: float = 0.2
 
@@ -22,14 +22,14 @@ class Train:
 @dataclass
 class Data:
     # path to save dataset
-    data_path: str = "QSA-main/data/input.txt"
+    data_path: str = "data/input.txt"
     # path to weights
-    checkpoints: str = "/weights/"
+    checkpoints: str = "weights/"
     # part for train
     train: float = 0.8
 
     load_checkpoint: bool = False
-    load_checkpoint_path: str = "/weights/checkpoint.pt"
+    load_checkpoint_path: str = "weights/checkpoint.pt"
 
 
 
