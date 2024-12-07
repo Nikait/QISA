@@ -145,9 +145,6 @@ class QSA(tq.QuantumModule):
         self.q = self.QueryKeyLayer(self.n_wires)
         self.v = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)
 
-        self.measure = tq.MeasureAll(tq.PauliZ)
-        self.fc = torch.nn.Linear(self.n_wires, 1)
-   
 
     def forward(self, x: Tensor) -> Tensor:
         """
