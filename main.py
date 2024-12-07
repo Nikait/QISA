@@ -108,6 +108,7 @@ def main(cfg: Config):
         cfg.train.n_layer
     ).to(device)
 
+    
     # loading checkpoint if provided
     if cfg.data.load_checkpoint:
         model.load_state_dict(torch.load(cfg.data.load_checkpoint_path))
