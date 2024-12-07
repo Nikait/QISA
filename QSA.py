@@ -107,6 +107,7 @@ class QSA(tq.QuantumModule):
 
             return out
 
+
     def choose_op(self):
         a = random.randint(0, 3)
         op_s = 'IXYZ'
@@ -124,6 +125,7 @@ class QSA(tq.QuantumModule):
             if op != op_elimated:
                 Select_wrong = False
 
+
         return op
     
     def __init__(self, n_embed: int, n_context: int, hidden_dim: int) -> None:
@@ -139,15 +141,9 @@ class QSA(tq.QuantumModule):
 
         self.encoder = tq.AmplitudeEncoder()
         
-        self.k = tq.QuantumModuleList(
-            [self.QueryKeyLayer(self.n_wires) for _ in range(self.n_context)]
-        )
-        self.q = tq.QuantumModuleList(
-            [self.QueryKeyLayer(self.n_wires) for _ in range(self.n_context)]
-        )
-        self.v = tq.QuantumModuleList(
-            [self.ValueLayer(self.n_wires, self.ops, self.hidden_dim) for _ in range(self.n_context)]
-        )
+        self.k = self.QueryKeyLayer(self.n_wires)
+        self.q = self.QueryKeyLayer(self.n_wires)
+        self.v = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)
 
         self.measure = tq.MeasureAll(tq.PauliZ)
         self.fc = torch.nn.Linear(self.n_wires, 1)
@@ -163,19 +159,26 @@ class QSA(tq.QuantumModule):
             n_wires=self.n_wires, bsz=x.shape[0], device=x.device
         )
         
-        Q_output = torch.stack([self.q[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
-        K_output = torch.stack([self.k[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
-        V_output = torch.stack([self.v[i](x[:,i], qdev) for i in range(self.n_context)], dim=1)
+        Q_output = torch.stack([self.q(x[:,i], qdev) for i in range(self.n_context)], dim=1)
+        K_output = torch.stack([self.k(x[:,i], qdev) for i in range(self.n_context)], dim=1)
+        V_output = torch.stack([self.v(x[:,i], qdev) for i in range(self.n_context)], dim=1)
+
 
         Q_output = Q_output.repeat((1, 1, self.n_context))
         K_output = K_output.repeat((1, 1, self.n_context))
         
+        alpha = torch.exp(-(Q_output-K_output)**2)
+        alpha = alpha.masked_fill(self.tril == 0, 0)
         
-        alpha = torch.exp(-(Q_output-K_output)**2) * (self.hidden_dim**(-0.5))
-        alpha = alpha.masked_fill(self.tril == 0,  float("-inf"))
-        masked_probs = F.softmax(alpha, dim=-1)
-        masked_probs = self.drop(masked_probs)
-        out = masked_probs @ V_output
         output = []
+
+        for i in range(self.n_context):
+            Sum_a=torch.sum(alpha[:,i,:],-1)
+            div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
+
+            Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
+            output.append(Sum_w)
+
+        out = torch.stack(output).transpose(0,1) ## Should we sum with x??
 
         return out
