@@ -30,7 +30,7 @@ def train_epoch(
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
         
-        if i % 5 == 0:
+        if i % 100 == 0:
             print(i, losses.tolist()[:i+1])
 
         loss.backward()
@@ -108,7 +108,6 @@ def main(cfg: Config):
         cfg.train.n_layer
     ).to(device)
 
-    
     # loading checkpoint if provided
     if cfg.data.load_checkpoint:
         model.load_state_dict(torch.load(cfg.data.load_checkpoint_path))
