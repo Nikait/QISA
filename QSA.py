@@ -167,15 +167,22 @@ class QSA(tq.QuantumModule):
         alpha = torch.exp(-(Q_output-K_output)**2)
         alpha = alpha.masked_fill(self.tril == 0, 0)
         
-        output = []
+        # output = []
 
-        for i in range(self.n_context):
-            Sum_a=torch.sum(alpha[:,i,:],-1)
-            div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
+        # for i in range(self.n_context):
+        #     Sum_a=torch.sum(alpha[:,i,:],-1)
+        #     div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
 
-            Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
-            output.append(Sum_w)
+        #     Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
+        #     output.append(Sum_w)
 
-        out = torch.stack(output).transpose(0,1) ## Should we sum with x??
+        # out = torch.stack(output).transpose(0,1) ## Should we sum with x??
+
+        # a shortcut version of the code above
+        
+        out = torch.sum(
+            alpha.permute(0, 2, 1).unsqueeze(-1) * value.unsqueeze(1) * (1 / torch.sum(alpha, dim=-1, keepdim=True)).unsqueeze(-1),
+            dim=2
+        )
 
         return out
