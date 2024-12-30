@@ -51,3 +51,15 @@
 - **Embedding size** = 16
 
 ![Cross-entropy comparison: Original QSA vs Fixed QSA vs CSA with embedding size = 16](https://github.com/user-attachments/assets/b5908d27-ae87-4ee5-a138-71b02e2536fc)
+
+## Changing the QK normalization
+The origianl paper proposed the plain averaging:
+![image](https://github.com/user-attachments/assets/06adef59-0773-44f2-9168-2c849f906c2a)
+Changed to the softmaxing, become slightly worse:
+
+**Training Setup:**
+- **Context size** = 16
+- **Embedding size** = 4
+
+![image](https://github.com/user-attachments/assets/ba845d79-e38a-47d6-8e53-bb1304725086)
+
