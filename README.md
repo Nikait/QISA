@@ -70,7 +70,9 @@ Changed to the softmaxing, become slightly worse:
 ## QSA Fixedv2: Changing the Q/K layer structure like the V structure: obtain hidden size diffrent measurements instead of repeating 1 measurement
 
 Gives slightly worse cross-entropy than the original QSA, but uses the logarithmically fewer parameters
+
 Also, because of multiple measurements it works slightly longer than orinal QSA (44 mins/epoch for the fixedv2 vs 38 mins/epoch on the T4 GPU)
+
 This version also has the same parameters number as the previous Fixed version
 
 **The whole table of the number of parameters**
