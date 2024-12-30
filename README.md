@@ -54,6 +54,8 @@
 
 ## Changing the QK normalization
 The origianl paper proposed the plain averaging:
+
+
 ![image](https://github.com/user-attachments/assets/06adef59-0773-44f2-9168-2c849f906c2a)
 
 
