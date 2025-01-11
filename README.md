@@ -13,7 +13,7 @@
 
 | **CSA Parameters**                          | **QSA Parameters**                                      |
 |---------------------------------------------|---------------------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × ⌈log₂(embedding_size)⌉ × context_size`             |
+| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             |
 
 **Training Setup:**
 - **Context size** = 16
@@ -34,9 +34,9 @@
 
 **Number of parameters per a single self-attention layer:**
 
-| **CSA Parameters**                          | **Original QSA Parameters**                             | **Fixed QSA Parameters**                     |
-|---------------------------------------------|---------------------------------------------------------|----------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × ⌈log₂(embedding_size)⌉ × context_size`             | `3 × ⌈log₂(embedding_size)⌉`                 |
+| **CSA Parameters**                          | **Original QSA Parameters**                                 | **Fixed QSA Parameters**                         |
+|---------------------------------------------|-------------------------------------------------------------|--------------------------------------------------|
+| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             | `3 x 3 × ⌈log₂(embedding_size)⌉`                 |
 
 **Training Setup:**
 - **Context size** = 16
@@ -77,9 +77,9 @@ This version also has the same parameters number as the previous Fixed version
 
 **The whole table of the number of parameters**
 
-| **CSA Parameters**                          | **Original QSA Parameters**                             | **Fixed QSA Parameters**                     | **Fixedv2 QSA Parameters**                   |
-|---------------------------------------------|---------------------------------------------------------|----------------------------------------------|----------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × ⌈log₂(embedding_size)⌉ × context_size`             | `3 × ⌈log₂(embedding_size)⌉`                 | `3 × ⌈log₂(embedding_size)⌉`                 |
+| **CSA Parameters**                          | **Original QSA Parameters**                                 | **Fixed QSA Parameters**                         | **Fixedv2 QSA Parameters**                       |
+|---------------------------------------------|-------------------------------------------------------------|--------------------------------------------------|--------------------------------------------------|
+| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             | `3 × 3 x ⌈log₂(embedding_size)⌉`                 | `3 × 3 x ⌈log₂(embedding_size)⌉`                 |
 
 
 **Training Setup:**
