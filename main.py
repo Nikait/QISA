@@ -14,6 +14,7 @@ from conf.config import Config
 
 
 
+import time
 def train_epoch(
         loader: torch.utils.data.DataLoader, 
         model: nn.Module, 
@@ -23,22 +24,33 @@ def train_epoch(
     ) -> tensor:
 
     losses = torch.zeros(len(loader))
+    batch_times = []  # To store the time for each batch
 
     for i, (x, y) in enumerate(loader):
+        start_time = time.time()  # Start timing the batch
+
         optimizer.zero_grad()
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
         
-        if i % 100 == 0:
-            print(i, losses.tolist()[:i+1])
+        # End timing the batch
+        end_time = time.time()
+        batch_time = end_time - start_time
+        batch_times.append(batch_time)
 
         loss.backward()
         optimizer.step()
 
-    info = torch.mean(losses)
+        print(f"Batch {i:4d}: Loss = {loss.item():.4f}, Time = {batch_time:.4f}s ", losses.tolist()[:i+1])
+        
 
-    return info
+    avg_loss = torch.mean(losses)
+    avg_time = sum(batch_times) / len(batch_times)
+
+    print(f"Average Loss: {avg_loss:.4f}, Average Batch Time: {avg_time:.4f}s")
+    return avg_loss
+
 
 
 @torch.inference_mode()
@@ -51,17 +63,24 @@ def test_epoch(
     ) -> tensor:
 
     losses = torch.zeros(len(loader))
+    batch_times = []
 
     for i, (x, y) in enumerate(loader):
+        start_time = time.time()
         optimizer.zero_grad()
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
-        if i % 5 == 0:
-            print(i, loss.item())
+        end_time = time.time()
+        batch_time = end_time - start_time
+        batch_times.append(batch_time)
+        print(f"Batch {i:4d}: Loss = {loss.item():.4f}, Time = {batch_time:.4f}s ", losses.tolist()[:i+1])
+
 
     info = torch.mean(losses)
-
+    avg_loss = torch.mean(losses)
+    avg_time = sum(batch_times) / len(batch_times)
+    print(f"Average Loss: {avg_loss:.4f}, Average Batch Time: {avg_time:.4f}s")
     return info
 
 
