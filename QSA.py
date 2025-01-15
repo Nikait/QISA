@@ -66,7 +66,6 @@ class QSA(tq.QuantumModule):
             self.ops = ops
 
             self.encoding = tq.AmplitudeEncoder()
-            # gates with trainable parameters
             self.rx0 = tq.QuantumModuleList(
                 [tq.RX(has_params=True, trainable=True) for _ in range(n_wires)]
             )
@@ -77,35 +76,43 @@ class QSA(tq.QuantumModule):
                 [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
             )
 
-        
-
         def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
             """
-            input: (B,C)
-            otput: (B,C)
+            input: (B, T, C) or (B, C) for single time step
+            output: (B, T, C) or (B, C)
             """
-            base_states = torch.zeros_like(qdev.get_states_1d())
+            if x.dim() == 2:  # Handle single time step for backward compatibility
+                x = x.unsqueeze(1)  # (B, 1, C)
+
+            B, T, C = x.shape
+            base_states = torch.zeros((B, 1 << self.n_wires), device=x.device)
             base_states[:, 0] = 1.0
 
             qdev.set_states(base_states)
 
-            x = self.encoding(qdev, x)
+            # Flatten batch and time for parallel processing
+            x = x.view(B * T, C)
+            self.encoding(qdev, x)
 
             for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
                 rx(qdev, wires=j)
                 ry(qdev, wires=j)
-            
-            for j in range(self.n_wires):
+
+            for _ in range(self.n_wires):
                 for j in range(self.n_wires):
-                    tqf.cnot(qdev, wires=[j, (j+1) % self.n_wires])
+                    tqf.cnot(qdev, wires=[j, (j + 1) % self.n_wires])
 
                 for j, ry in enumerate(self.ry1):
                     ry(qdev, wires=j)
-            
-            measurements = [expval_joint_analytical(qdev, self.ops[i]) for i in range(self.hidden_dim)]
-            out = torch.stack(measurements, dim=-1)
+
+            measurements = [
+                expval_joint_analytical(qdev, self.ops[i]).view(B, T, 1)
+                for i in range(self.hidden_dim)
+            ]
+            out = torch.cat(measurements, dim=-1)  # (B, T, hidden_dim)
 
             return out
+
 
 
     def choose_op(self):
@@ -141,48 +148,31 @@ class QSA(tq.QuantumModule):
 
         self.encoder = tq.AmplitudeEncoder()
         
-        self.k = self.QueryKeyLayer(self.n_wires)
-        self.q = self.QueryKeyLayer(self.n_wires)
+        self.k = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)#self.QueryKeyLayer(self.n_wires)
+        self.q = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)#self.QueryKeyLayer(self.n_wires)
         self.v = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)
 
 
     def forward(self, x: Tensor) -> Tensor:
         """
-        x: (B,T,embed_size) - input states
-        returns: (B,T,hidden_size)
+        x: (B, T, embed_size) - input states
+        returns: (B, T, embed_size)
         """
-        
         qdev = tq.QuantumDevice(
-            n_wires=self.n_wires, bsz=x.shape[0], device=x.device
+            n_wires=self.n_wires, bsz=x.shape[0] * x.shape[1], device=x.device
         )
-        
-        Q_output = torch.stack([self.q(x[:,i], qdev) for i in range(self.n_context)], dim=1)
-        K_output = torch.stack([self.k(x[:,i], qdev) for i in range(self.n_context)], dim=1)
-        V_output = torch.stack([self.v(x[:,i], qdev) for i in range(self.n_context)], dim=1)
 
+        q = self.q(x, qdev)  # (B, T, hidden_dim)
+        k = self.k(x, qdev)  # (B, T, hidden_dim)
+        v = self.v(x, qdev)  # (B, T, hidden_dim)
 
-        Q_output = Q_output.repeat((1, 1, self.n_context))
-        K_output = K_output.repeat((1, 1, self.n_context))
-        
-        alpha = torch.exp(-(Q_output-K_output)**2)
-        alpha = alpha.masked_fill(self.tril == 0, 0)
-        
-        # output = []
+        q = q.repeat((1, 1, self.n_context // self.hidden_dim))
+        k = k.repeat((1, 1, self.n_context // self.hidden_dim))
 
-        # for i in range(self.n_context):
-        #     Sum_a=torch.sum(alpha[:,i,:],-1)
-        #     div_sum_a=(1 / Sum_a).repeat(self.hidden_dim, self.n_context,1).transpose(0,2)
+        alpha = torch.exp(-(q - k) ** 2)
+        alpha = alpha.masked_fill(self.tril == 0, float('-inf'))
 
-        #     Sum_w=torch.sum(alpha[:,:,i].repeat((self.hidden_dim,1,1)).transpose(0,2).transpose(0,1)*V_output*div_sum_a,1)
-        #     output.append(Sum_w)
-
-        # out = torch.stack(output).transpose(0,1) ## Should we sum with x??
-
-        # a shortcut version of the code above
-        
-        out = torch.sum(
-            alpha.permute(0, 2, 1).unsqueeze(-1) * value.unsqueeze(1) * (1 / torch.sum(alpha, dim=-1, keepdim=True)).unsqueeze(-1),
-            dim=2
-        )
+        normalized_alpha = F.softmax(alpha, dim=-1)
+        out = normalized_alpha.permute(0, 2, 1) @ v
 
         return out
