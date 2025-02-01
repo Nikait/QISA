@@ -12,52 +12,6 @@ import torch.nn.functional as F
 
 
 class QSA(tq.QuantumModule):
-    class QueryKeyLayer(tq.QuantumModule):
-        def __init__(self, n_wires: int):
-            super().__init__()
-            self.n_wires = n_wires
-
-            self.encoding = tq.AmplitudeEncoder()
-            self.measure = tq.MeasureAll(tq.PauliZ)
-            # gates with trainable parameters
-            self.rx0 = tq.QuantumModuleList(
-                [tq.RX(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry0 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-            self.ry1 = tq.QuantumModuleList(
-                [tq.RY(has_params=True, trainable=True) for _ in range(n_wires)]
-            )
-
-
-        def forward(self, x: Tensor, qdev: tq.QuantumDevice) -> Tensor:
-            """
-            input: (B,C)
-            otput: (B,)
-            """
-            x = self.encoding(qdev, x)
-            base_states = torch.zeros_like(qdev.get_states_1d())
-            base_states[:, 0] = 1.0
-
-            qdev.set_states(base_states)
-
-            for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
-                rx(qdev, wires=j)
-                ry(qdev, wires=j)
-            
-            for j in range(self.n_wires):
-                for j in range(self.n_wires):
-                    tqf.cnot(qdev, wires=[j, (j+1) % self.n_wires])
-
-                for j, ry in enumerate(self.ry1):
-                    ry(qdev, wires=j)
-            
-            out = tq.expval(qdev, 0, tq.PauliZ())
-
-            return out
-
-
     class ValueLayer(tq.QuantumModule):
         def __init__(self, n_wires: int, ops: list[str], hidden_dim: int):
             super().__init__()
@@ -114,7 +68,6 @@ class QSA(tq.QuantumModule):
             return out
 
 
-
     def choose_op(self):
         a = random.randint(0, 3)
         op_s = 'IXYZ'
@@ -135,43 +88,44 @@ class QSA(tq.QuantumModule):
 
         return op
     
-    def __init__(self, n_embed: int, n_context: int, hidden_dim: int) -> None:
+    def __init__(self, n_embed: int, n_context: int, head_size: int, qk_function: str = "gaussian") -> None:
         super().__init__()
-        self.hidden_dim = hidden_dim
+        self.qk_function = qk_function
+        self.head_size = head_size
         self.n_context = n_context
         self.n_wires = int(np.ceil(np.log2(n_embed)))
         self.n_states = 1 << self.n_wires
         self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
-        self.drop = nn.Dropout(0.2)
-
-        self.ops = [self.choose_op()[:self.n_wires] for _ in range(1 << self.hidden_dim)]
-
+        self.ops = [self.choose_op()[:self.n_wires] for _ in range(self.head_size)]
         self.encoder = tq.AmplitudeEncoder()
         
-        self.k = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)#self.QueryKeyLayer(self.n_wires)
-        self.q = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)#self.QueryKeyLayer(self.n_wires)
-        self.v = self.ValueLayer(self.n_wires, self.ops, self.hidden_dim)
-
-
+        self.k = self.ValueLayer(self.n_wires, self.ops, self.head_size)
+        self.q = self.ValueLayer(self.n_wires, self.ops, self.head_size)
+        self.v = self.ValueLayer(self.n_wires, self.ops, self.head_size)
+        
     def forward(self, x: Tensor) -> Tensor:
         """
         x: (B, T, embed_size) - input states
         returns: (B, T, embed_size)
         """
+        B, T, C = x.shape
+
         qdev = tq.QuantumDevice(
-            n_wires=self.n_wires, bsz=x.shape[0] * x.shape[1], device=x.device
+            n_wires=self.n_wires, bsz=B * T, device=x.device
         )
+        
+        q, k, v = self.q(x, qdev), self.k(x, qdev), self.v(x, qdev) # (B, T, head_size)
 
-        q = self.q(x, qdev)  # (B, T, hidden_dim)
-        k = self.k(x, qdev)  # (B, T, hidden_dim)
-        v = self.v(x, qdev)  # (B, T, hidden_dim)
+        if self.qk_function == "gaussian":
+            q = q.unsqueeze(2)  # (B, T, 1, head_size)
+            k = k.unsqueeze(1)  # (B, 1, T, head_size)
+    
+            alpha = torch.exp(-((q - k) ** 2).sum(dim=-1)) # → (B, T, T)
+        else:
+            alpha = q @ k.transpose(-2, -1) * self.head_size**(-0.5)
 
-        q = q.repeat((1, 1, self.n_context // self.hidden_dim))
-        k = k.repeat((1, 1, self.n_context // self.hidden_dim))
-
-        alpha = torch.exp(-(q - k) ** 2)
+        
         alpha = alpha.masked_fill(self.tril == 0, float('-inf'))
-
         normalized_alpha = F.softmax(alpha, dim=-1)
         out = normalized_alpha.permute(0, 2, 1) @ v
 
