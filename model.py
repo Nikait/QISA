@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from QSA import QSA
+from QSAv2 import QSA
 
 
 """
