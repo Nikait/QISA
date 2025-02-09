@@ -9,7 +9,7 @@ import torchquantum.functional as tqf
 from torchquantum.measurement import expval_joint_analytical
 import random
 
-# ----------------- Helper Functions -----------------
+
 
 def rx_matrix(theta: float) -> torch.Tensor:
     """
@@ -86,25 +86,7 @@ def op_str_to_matrix(op_str: str) -> torch.Tensor:
     matrices = [pauli[c] for c in op_str]
     return tensor_list(matrices)
 
-def amplitude_encode_batch(x: torch.Tensor, n_wires: int) -> torch.Tensor:
-    """
-    Encodes a batch of input vectors into quantum state amplitudes.
-    The input is padded with zeros to reach dimension 2^(n_wires) and then normalized.
-
-    Args:
-        x (torch.Tensor): Input tensor of shape (N, n_features) where N is the number of samples.
-        n_wires (int): Number of qubits; the output state will have dimension 2^(n_wires).
-
-    Returns:
-        torch.Tensor: A tensor of shape (N, 2^(n_wires)) with normalized complex amplitudes.
-    """
-    N, n_features = x.shape
-    dim = 1 << n_wires
-    x_padded = torch.zeros((N, dim), dtype=torch.cdouble, device=x.device)
-    x_padded[:, :n_features] = x.to(torch.cdouble)
-    norm = torch.linalg.norm(x_padded, dim=1, keepdim=True)
-    norm_fixed = torch.where(norm == 0, torch.ones_like(norm), norm)
-    return x_padded / norm_fixed
+   
 
 def expand_operator(gate: torch.Tensor, target_qubits: list, n: int) -> torch.Tensor:
     """
