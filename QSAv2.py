@@ -66,27 +66,6 @@ def tensor_list(matrices: list) -> torch.Tensor:
         result = torch.kron(result, mat)
     return result
 
-def op_str_to_matrix(op_str: str) -> torch.Tensor:
-    """
-    Converts a string of Pauli operators into the corresponding matrix.
-    For example, the string "IXYZ" is converted into I ⊗ X ⊗ Y ⊗ Z.
-
-    Args:
-        op_str (str): A string consisting of characters 'I', 'X', 'Y', 'Z'.
-
-    Returns:
-        torch.Tensor: A matrix obtained by taking the tensor product of the corresponding Pauli matrices.
-    """
-    pauli = {
-        'I': torch.eye(2, dtype=torch.cdouble),
-        'X': torch.tensor([[0, 1], [1, 0]], dtype=torch.cdouble),
-        'Y': torch.tensor([[0, -1j], [1j, 0]], dtype=torch.cdouble),
-        'Z': torch.tensor([[1, 0], [0, -1]], dtype=torch.cdouble)
-    }
-    matrices = [pauli[c] for c in op_str]
-    return tensor_list(matrices)
-
-   
 
 def expand_operator(gate: torch.Tensor, target_qubits: list, n: int) -> torch.Tensor:
     """
@@ -126,27 +105,10 @@ def expand_operator(gate: torch.Tensor, target_qubits: list, n: int) -> torch.Te
             U_full[new_i, i] += gate[j, sub_index]
     return U_full
 
-def generate_random_pauli_ops(num_ops: int, num_qubits: int) -> list:
-    """
-    Generates a list of random Pauli operator strings.
 
-    Args:
-        num_ops (int): Number of operator strings to generate.
-        num_qubits (int): Length of each operator string (i.e., number of qubits).
 
-    Returns:
-        list: A list of randomly generated Pauli operator strings.
-    """
-    pauli_operators = ['I', 'X', 'Y', 'Z']
-    ops = []
-    for _ in range(num_ops):
-        op = ''.join(random.choice(pauli_operators) for _ in range(num_qubits))
-        # Ensure that the operator is nontrivial (not all 'I').
-        if op != 'I' * num_qubits:
-            ops.append(op)
-        else:
-            ops.append(random.choice(pauli_operators[1:]) * num_qubits)
-    return ops
+
+
 
 # ----------------- Quantum Self-Attention Layer -----------------
 
