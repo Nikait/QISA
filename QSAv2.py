@@ -51,21 +51,6 @@ def cnot_matrix() -> torch.Tensor:
                          [0, 0, 0, 1],
                          [0, 0, 1, 0]], dtype=torch.cdouble)
 
-def tensor_list(matrices: list) -> torch.Tensor:
-    """
-    Computes the tensor (Kronecker) product of a list of matrices.
-
-    Args:
-        matrices (list): A list of torch.Tensor objects.
-
-    Returns:
-        torch.Tensor: The resulting tensor product.
-    """
-    result = matrices[0]
-    for mat in matrices[1:]:
-        result = torch.kron(result, mat)
-    return result
-
 
 def expand_operator(gate: torch.Tensor, target_qubits: list, n: int) -> torch.Tensor:
     """
