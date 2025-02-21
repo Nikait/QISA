@@ -1,12 +1,12 @@
 import hydra
 import logging
 import os
+import time
 
 import torch
 from torch import nn
-from torch import Tensor, tensor
+from torch import tensor
 import torch.optim as optim
-import torchquantum as tq
 
 from dataset import TextDataset
 from model import GPT
@@ -14,43 +14,30 @@ from conf.config import Config
 
 
 
-import time
-def train_epoch(
-        loader: torch.utils.data.DataLoader, 
-        model: nn.Module, 
-        criterion: nn.Module, 
-        optimizer: optim.Optimizer,
-        device: str
-    ) -> tensor:
 
+def train_epoch(loader: torch.utils.data.DataLoader, model: nn.Module, criterion: nn.Module, optimizer: optim.Optimizer, device: str) -> tensor:
+    model.train()
     losses = torch.zeros(len(loader))
-    batch_times = []  # To store the time for each batch
-
+    batch_times = []
     for i, (x, y) in enumerate(loader):
-        start_time = time.time()  # Start timing the batch
-
+        start_time = time.time()
         optimizer.zero_grad()
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
-        
-        # End timing the batch
         end_time = time.time()
         batch_time = end_time - start_time
         batch_times.append(batch_time)
-
         loss.backward()
         optimizer.step()
-
-        print(f"Batch {i:4d}: Loss = {loss.item():.4f}, Time = {batch_time:.4f}s ", losses.tolist()[:i+1])
-        
-
+        if i % 10 == 0:
+            print(f"Batch {i:4d}: Current Loss = {loss.item():.4f}")
     avg_loss = torch.mean(losses)
     avg_time = sum(batch_times) / len(batch_times)
-
     print(f"Average Loss: {avg_loss:.4f}, Average Batch Time: {avg_time:.4f}s")
+    with open("logs.txt", "a") as f:
+         f.write(str(losses.tolist()[:i+1]) + "\n")
     return avg_loss
-
 
 
 @torch.inference_mode()
@@ -62,12 +49,19 @@ def test_epoch(
         device: str
     ) -> tensor:
 
+    model.eval()
+
     losses = torch.zeros(len(loader))
     batch_times = []
+    cnt = 0
 
     for i, (x, y) in enumerate(loader):
+        # cnt += 1
+        # if cnt > 4:
+        #     return
         start_time = time.time()
         optimizer.zero_grad()
+        #print("\n\nNEW FORWARD PASS\n\n")
         logits = model(x.to(device))
         loss = criterion(logits, y.to(device).view(-1,))
         losses[i] = loss.item()
@@ -75,6 +69,7 @@ def test_epoch(
         batch_time = end_time - start_time
         batch_times.append(batch_time)
         print(f"Batch {i:4d}: Loss = {loss.item():.4f}, Time = {batch_time:.4f}s ", losses.tolist()[:i+1])
+        
 
 
     info = torch.mean(losses)
@@ -98,6 +93,9 @@ def main(cfg: Config):
     # >>> Preparing the dataset
     with open(cfg.data.data_path, 'r', encoding='utf-8') as f:
         text = f.read()
+
+
+    text = text[:len(text)]
 
     characters = sorted(list(set(text)))
     train_size = int(len(text) * cfg.data.train)
@@ -143,7 +141,7 @@ def main(cfg: Config):
         )
         logging.info(f"Epoch: {epoch}, train loss: {mean_loss:.2f}")
         
-        # testing
+        # # testing
         mean_loss = test_epoch(
             test_dataloader, model, criterion, optimizer, device
         )
