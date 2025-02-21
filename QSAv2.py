@@ -213,6 +213,7 @@ class QSA(nn.Module):
             torch.Tensor: Output tensor after applying quantum self-attention.
         """
         if self.training:
+            self.__precomputed = False
             return self._forward_slow(x)
         else:
             if not self.__precomputed:
