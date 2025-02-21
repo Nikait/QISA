@@ -4,16 +4,13 @@ import torch.nn.functional as F
 
 from QSA import QSA
 
-"""
-Actual source:
-https://github.com/karpathy/nanoGPT
-"""
+
+
 
 class TransformerBlock(nn.Module):
     def __init__(self, num_heads: int, n_embed: int, block_size: int, layer_id: int):
         super(TransformerBlock, self).__init__()
         hidden_dim = n_embed // num_heads
-        # Передаём layer_id в MultiHeadSelfAttention
         self.mhsa = MultiHeadSelfAttention(num_heads, hidden_dim, n_embed, block_size, layer_id)
         self.feed_forward = FeedForward(n_embed)
         self.norm1 = nn.LayerNorm(n_embed)
@@ -41,7 +38,6 @@ class MultiHeadSelfAttention(nn.Module):
     def __init__(self, num_heads: int, hidden_dim: int, n_embed: int, block_size: int, layer_id: int, dropout: float=0.2):
         super(MultiHeadSelfAttention, self).__init__()
         self.num_heads = num_heads
-        # Для каждой головы передаём и номер слоя, и номер головы
         self.heads = nn.ModuleList([
             SingleHead(hidden_dim, n_embed, block_size, layer_id, head_id=i)
             for i in range(num_heads)
@@ -58,7 +54,6 @@ class MultiHeadSelfAttention(nn.Module):
 class SingleHead(nn.Module):
     def __init__(self, hidden_dim: int, n_embed: int, block_size: int, layer_id: int, head_id: int, dropout: float=0.2):
         super(SingleHead, self).__init__()
-        # Передаём и layer_id, и head_id в QSA
         self.qsa = QSA(n_embed, block_size, hidden_dim, layer_id, head_id)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -72,7 +67,7 @@ class GPT(nn.Module):
         self.block_size = block_size
         self.embedding = nn.Embedding(vocab_size, n_embed)
         self.positional_embedding_table = nn.Embedding(block_size, n_embed)
-        # Создаём трансформер‑слои с уникальными номерами
+        
         self.blocks = nn.Sequential(
             *[TransformerBlock(num_heads, n_embed, block_size, layer_id=i) for i in range(n_layers)]
         )
