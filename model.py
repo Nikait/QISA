@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from QSAv2 import QSA
-
+from QSA import QSA
 
 """
 Actual source:
@@ -11,15 +10,11 @@ https://github.com/karpathy/nanoGPT
 """
 
 class TransformerBlock(nn.Module):
-    def __init__(
-            self, 
-            num_heads: int, 
-            n_embed: int, 
-            block_size: int
-        ):
+    def __init__(self, num_heads: int, n_embed: int, block_size: int, layer_id: int):
         super(TransformerBlock, self).__init__()
         hidden_dim = n_embed // num_heads
-        self.mhsa = MultiHeadSelfAttention(num_heads, hidden_dim, n_embed, block_size)
+        # Передаём layer_id в MultiHeadSelfAttention
+        self.mhsa = MultiHeadSelfAttention(num_heads, hidden_dim, n_embed, block_size, layer_id)
         self.feed_forward = FeedForward(n_embed)
         self.norm1 = nn.LayerNorm(n_embed)
         self.norm2 = nn.LayerNorm(n_embed)
@@ -29,14 +24,8 @@ class TransformerBlock(nn.Module):
         x = x + self.feed_forward(self.norm2(x))
         return x
 
-
 class FeedForward(nn.Module):
-    def __init__(
-            self, 
-            n_embed: int, 
-            extend_width: int=4, 
-            dropout: float=0.2
-        ):
+    def __init__(self, n_embed: int, extend_width: int=4, dropout: float=0.2):
         super(FeedForward, self).__init__()
         self.layer = nn.Sequential(
             nn.Linear(n_embed, extend_width*n_embed), 
@@ -48,19 +37,15 @@ class FeedForward(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layer(x)
 
-
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(
-            self, 
-            num_heads: int, 
-            hidden_dim: int, 
-            n_embed: int, 
-            block_size: int, 
-            dropout: float=0.2
-        ):
+    def __init__(self, num_heads: int, hidden_dim: int, n_embed: int, block_size: int, layer_id: int, dropout: float=0.2):
         super(MultiHeadSelfAttention, self).__init__()
         self.num_heads = num_heads
-        self.heads = nn.ModuleList([SingleHead(hidden_dim, n_embed, block_size) for _ in range(self.num_heads)])
+        # Для каждой головы передаём и номер слоя, и номер головы
+        self.heads = nn.ModuleList([
+            SingleHead(hidden_dim, n_embed, block_size, layer_id, head_id=i)
+            for i in range(num_heads)
+        ])
         self.project = nn.Linear(n_embed, n_embed)
         self.drop = nn.Dropout(dropout)
     
@@ -70,51 +55,38 @@ class MultiHeadSelfAttention(nn.Module):
         out = self.drop(out)
         return out
 
-
 class SingleHead(nn.Module):
-    def __init__(
-            self, 
-            hidden_dim: int, 
-            n_embed: int, 
-            block_size: int, 
-            dropout: float=0.2
-        ):
+    def __init__(self, hidden_dim: int, n_embed: int, block_size: int, layer_id: int, head_id: int, dropout: float=0.2):
         super(SingleHead, self).__init__()
-        self.qsa = QSA(n_embed, block_size, hidden_dim)
+        # Передаём и layer_id, и head_id в QSA
+        self.qsa = QSA(n_embed, block_size, hidden_dim, layer_id, head_id)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.qsa(x)
         return out
 
-
 class GPT(nn.Module):
-    def __init__(
-            self, 
-            vocab_size: int, 
-            block_size: int, 
-            n_embed: int, 
-            num_heads: int, 
-            n_layers: int
-        ):
+    def __init__(self, vocab_size: int, block_size: int, n_embed: int, num_heads: int, n_layers: int):
         super(GPT, self).__init__()
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.embedding = nn.Embedding(vocab_size, n_embed)
         self.positional_embedding_table = nn.Embedding(block_size, n_embed)
+        # Создаём трансформер‑слои с уникальными номерами
         self.blocks = nn.Sequential(
-            *[TransformerBlock(num_heads, n_embed, block_size) for _ in range(n_layers)],
+            *[TransformerBlock(num_heads, n_embed, block_size, layer_id=i) for i in range(n_layers)]
         )
         self.norm = nn.LayerNorm(n_embed)        
         self.fc = nn.Linear(n_embed, vocab_size)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T = x.shape
-        token_embeddings = self.embedding(x) # B, T -> B, T, N_EMB
-        positional_embedding = self.positional_embedding_table(torch.arange(T, device=x.device)) # T -> T, C
-        token_embeddings = token_embeddings + positional_embedding # B, T, C + T, C -> B, T, C
+        token_embeddings = self.embedding(x)  # B, T, n_embed
+        positional_embedding = self.positional_embedding_table(torch.arange(T, device=x.device))
+        token_embeddings = token_embeddings + positional_embedding
         blocks_out = self.blocks(token_embeddings)
         blocks_out = self.norm(blocks_out)
-        logits = self.fc(blocks_out) # B, T, N_EMB -> B, T, C
+        logits = self.fc(blocks_out)
         logits = logits.reshape(B*T, self.vocab_size)
         return logits
 
