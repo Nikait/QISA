@@ -136,16 +136,16 @@ class QSA(nn.Module):
         
         # Fast branch for inference - pass both identifiers
         self.q_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
-                                     self.transformer_layer_id, self.head_id)
+                                     self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
         self.k_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
                                      self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
         self.v_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
-                                     self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
+                                     self.transformer_layer_id, self.head_id)
         
         # Slow branch for training
-        self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size)
+        self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
         self.k_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
-        self.v_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
+        self.v_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size)
         self.unitary_count = 0
 
     def choose_op(self) -> str:
