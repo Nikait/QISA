@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
-from abc import abstractmethod
+import cmath
 import torchquantum as tq
 import torchquantum.functional as tqf
 from torchquantum.measurement import expval_joint_analytical
@@ -111,7 +111,15 @@ class QSA(nn.Module):
     Returns:
         QSA: An instance of the quantum self-attention layer.
     """
-    def __init__(self, n_embed: int, n_context: int, head_size: int, layer_id: int, head_id: int, version=1):
+    def __init__(
+        self, 
+        n_embed: int, 
+        n_context: int, 
+        head_size: int, 
+        layer_id: int, 
+        head_id: int,
+        version=2
+    ):
         super().__init__()
         assert version in [1, 2], "the version of the QSA has to be equal 1 or 2"
 
@@ -121,25 +129,23 @@ class QSA(nn.Module):
         self.n_context = n_context
         self.transformer_layer_id = layer_id  # transformer layer number
         self.head_id = head_id                # head index
+        self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
         self.n_wires = int(np.ceil(np.log2(n_embed)))
         self.ops = [self.choose_op() for _ in range(self.head_size)]
-        self.register_buffer('tril', torch.tril(torch.ones(n_context, n_context)))
-        
-
         print(f"Generated Pauli strings for layer {layer_id} head {head_id}: ", self.ops)
         
         # Fast branch for inference - pass both identifiers
         self.q_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
-                                     self.transformer_layer_id, self.head_id, debug=True, qk=self.__use_kv_one_measurement)
+                                     self.transformer_layer_id, self.head_id)
         self.k_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
-                                     self.transformer_layer_id, self.head_id, debug=True, qk=self.__use_kv_one_measurement)
+                                     self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
         self.v_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
-                                     self.transformer_layer_id, self.head_id, debug=True)
+                                     self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
         
         # Slow branch for training
-        self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, debug=True, qk=self.__use_kv_one_measurement)
-        self.k_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, debug=True, qk=self.__use_kv_one_measurement)
-        self.v_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, debug=True)
+        self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size)
+        self.k_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
+        self.v_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
         self.unitary_count = 0
 
     def choose_op(self) -> str:
@@ -263,197 +269,213 @@ class QSA(nn.Module):
 
         print("[INFO] Precomputation completed. Fast branch matrices updated.")
 
+# ----------------- Fast Branch: ValueLayerFast -----------------
 
-
-
-class ValueLayerBase(nn.Module):
+class ValueLayerFast(nn.Module):
     """
-    Base class for quantum value layers.
+    Fast value layer for inference.
 
-    Provides shared initialization and forward pass logic, delegating quantum evolution to subclasses.
+    This layer encodes the input state, applies a precomputed unitary evolution, and performs measurements.
+    The constructor accepts transformer_layer_id and head_id to generate unique names for the unitary matrices.
 
     Args:
-        n_wires (int): Number of qubits in the quantum circuit.
-        ops (list[str]): List of Pauli operators for measurement.
-        hidden_dim (int): Dimension of the output (number of measurements).
-        debug (bool): If True, enables debug mode (default: False).
+        n_wires (int): Number of qubits.
+        ops (list[str]): List of Pauli string operators for measurements.
+        hidden_dim (int): Number of measurement outcomes.
+        transformer_layer_id (int): Unique transformer layer number.
+        head_id (int): Head index within the transformer layer.
+        qk (bool): If True, enable debug logging.
+    
+    Returns:
+        ValueLayerFast: An instance of the fast value layer.
     """
-    def __init__(self, n_wires: int, ops: list[str], hidden_dim: int, debug: bool = False, qk=True):
+    def __init__(self, n_wires: int, ops: list[str], hidden_dim: int, transformer_layer_id: int, head_id: int, qk: bool = False):
         super().__init__()
-        self.__qk = qk
         self.hidden_dim = hidden_dim
         self.n_wires = n_wires
         self.ops = ops
         self.encoding = tq.AmplitudeEncoder()
-        self.debug = debug
+        self.transformer_layer_id = transformer_layer_id
+        self.head_id = head_id
+        self.__qk = qk
 
-        # Quantum rotation gates for all wires
+        self.rx0_params = tq.QuantumModuleList([tq.RX(has_params=True, trainable=True) for _ in range(n_wires)])
+        self.ry0_params = tq.QuantumModuleList([tq.RY(has_params=True, trainable=True) for _ in range(n_wires)])
+        self.ry1_params = tq.QuantumModuleList([tq.RY(has_params=True, trainable=True) for _ in range(n_wires)])
+
+        dim = 1 << self.n_wires
+        self.register_buffer('U', torch.eye(dim, dtype=torch.complex64))
+        self.unitary_counter = 0
+        self.current_unitary_id = None
+
+    def _build_unitary(self, unitary_count: int, layer_id: str, transformer_layer_id: int, head_id: int):
+        """
+        Builds the full unitary operator for the quantum circuit by composing gate operations,
+        and registers it with a unique name that includes the transformer layer and head identifiers.
+
+        Args:
+            unitary_count (int): A counter for unique unitary matrices.
+            layer_id (str): A string identifier for the current branch (e.g., "q_fast").
+            transformer_layer_id (int): The unique transformer layer number.
+            head_id (int): The head index within the transformer layer.
+
+        Returns:
+            None
+        """
+        n = self.n_wires
+        dim = 1 << n
+        device = self.rx0_params[0].params.device  
+        U_total = torch.eye(dim, dtype=torch.complex64, device=device)
+
+        for j in range(n):
+            rx_val = self.rx0_params[j].params.clone().item()
+            ry_val = self.ry0_params[j].params.clone()
+            
+            rx_param_tensor = torch.tensor(rx_val, device=device)
+            expanded_rx = expand_operator(rx_matrix(rx_param_tensor), [j], n).to(device=device, dtype=torch.complex64)
+            U_total = expanded_rx @ U_total
+
+            ry_param_tensor = torch.tensor(ry_val, device=device)
+            expanded_ry = expand_operator(ry_matrix(ry_param_tensor), [j], n).to(device=device, dtype=torch.complex64)
+            U_total = expanded_ry @ U_total
+
+        for j in range(n):
+            expanded_cnot = expand_operator(cnot_matrix(), [j, (j + 1) % n], n).to(device=device, dtype=torch.complex64)
+            U_total = expanded_cnot @ U_total
+
+        for j in range(n):
+            ry1_val = self.ry1_params[j].params.clone()
+            mat = ry_matrix(ry1_val).to('cpu')
+            expanded_ry1 = expand_operator(mat, [j], n).to(device=device, dtype=torch.complex64)
+            U_total = expanded_ry1 @ U_total
+
+        unique_name = f"layer{transformer_layer_id}_head{head_id}_{layer_id}_U{unitary_count}"
+        if hasattr(self, unique_name):
+            getattr(self, unique_name).data.copy_(U_total)
+        else:
+            self.register_buffer(unique_name, U_total)
+        self.current_unitary_id = unique_name
+        # Uncomment the following line for additional logging if needed:
+        # print(f"[INFO] Built operator {unique_name} for {layer_id}")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the fast value layer.
+        
+        This method encodes the input, applies the precomputed unitary evolution, and performs measurements.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, T, C).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (B, T, hidden_dim) containing measurement results.
+        """
+        B, T, C = x.shape
+        x_flat = x.view(B * T, C)
+        device = x.device
+
+        qdev = tq.QuantumDevice(n_wires=self.n_wires, bsz=B * T, device=device)
+        dim = 1 << self.n_wires
+        base_states = torch.zeros((B * T, dim), device=device, dtype=torch.complex64)
+        base_states[:, 0] = 1.0
+        qdev.set_states(base_states)
+        self.encoding(qdev, x_flat)
+        psi = qdev.states.reshape(B * T, -1).to(device=device, dtype=torch.complex64)
+        psi_reshaped = psi.view(B * T, *([2] * self.n_wires))
+
+        if self.current_unitary_id is None:
+            raise ValueError("Unitary operator has not been built. Please call _build_unitary first.")
+        U = getattr(self, self.current_unitary_id).to(device=device, dtype=torch.complex64)
+        # Uncomment the following line for additional logging if needed:
+        # print(f"[INFO] Using operator {self.current_unitary_id} in forward pass.")
+
+        psi_out = tqf.apply_unitary_bmm(psi_reshaped, U, list(range(self.n_wires)))
+        psi_out = psi_out.view(B * T, -1)
+        qdev.set_states(psi_out)
+        qdev.states = qdev.states.to(device=device, dtype=torch.complex64)
+
+        if self.__qk:
+            out = tq.expval(qdev, 0, tq.PauliZ())
+            measurements = [out] * len(self.ops)
+        else:
+            measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
+        #measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
+        out = torch.stack(measurements, dim=-1)
+        return out.view(B, T, self.hidden_dim).float()
+
+# ------------------ Slow Branch: ValueLayerSlow ------------------
+
+class ValueLayerSlow(nn.Module):
+    """
+    Slow value layer for training.
+
+    This layer encodes the input state and applies quantum operations step-by-step,
+    providing a detailed simulation of the quantum circuit.
+
+    Args:
+        n_wires (int): Number of qubits.
+        ops (list[str]): List of Pauli string operators for measurements.
+        hidden_dim (int): Number of measurement outcomes.
+        qk (bool): If True, enable debug logging.
+    
+    Returns:
+        ValueLayerSlow: An instance of the slow value layer.
+    """
+    def __init__(self, n_wires: int, ops: list[str], hidden_dim: int, qk: bool = False):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.n_wires = n_wires
+        self.ops = ops
+        self.encoding = tq.AmplitudeEncoder()
+        self.__qk = qk
+
         self.rx0 = tq.QuantumModuleList([tq.RX(has_params=True, trainable=True) for _ in range(n_wires)])
         self.ry0 = tq.QuantumModuleList([tq.RY(has_params=True, trainable=True) for _ in range(n_wires)])
         self.ry1 = tq.QuantumModuleList([tq.RY(has_params=True, trainable=True) for _ in range(n_wires)])
 
     def forward(self, x: torch.Tensor, qdev: tq.QuantumDevice = None) -> torch.Tensor:
         """
-        Forward pass for the value layer.
-
-        Handles input processing, state initialization, encoding, quantum evolution, and measurements.
-
+        Forward pass of the slow value layer.
+        
+        This method simulates the quantum circuit step-by-step by applying individual gates
+        and performing measurements.
+        
         Args:
-            x (torch.Tensor): Input tensor of shape (B, C) or (B, T, C).
-            qdev (tq.QuantumDevice, optional): Pre-initialized quantum device (default: None).
-
+            x (torch.Tensor): Input tensor of shape (B, T, C) or (B, C).
+            qdev (tq.QuantumDevice, optional): An optional pre-initialized quantum device.
+        
         Returns:
-            torch.Tensor: Output tensor of shape (B, T, hidden_dim) with measurement results.
+            torch.Tensor: Output tensor of shape (B, T, hidden_dim) containing measurement results.
         """
         if x.dim() == 2:
-            x = x.unsqueeze(1)  # Add time dimension if missing
+            x = x.unsqueeze(1)
         B, T, C = x.shape
         device = x.device
 
-        # Initialize quantum device if not provided
         if qdev is None:
             qdev = tq.QuantumDevice(n_wires=self.n_wires, bsz=B * T, device=device)
-
-        # Set initial state to |0...0>
         dim = 1 << self.n_wires
-        base_states = torch.zeros((B * T, dim), device=device, dtype=torch.complex64)
+        base_states = torch.zeros((B, dim), device=device, dtype=torch.float32)
         base_states[:, 0] = 1.0
         qdev.set_states(base_states)
-
-        # Encode input data
         x_flat = x.view(B * T, C)
         self.encoding(qdev, x_flat)
+        
+        for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
+            rx(qdev, wires=j)
+            ry(qdev, wires=j)
 
-        # Delegate quantum operations to subclass
-        self.apply_quantum_evolution(qdev)
+        for j in range(self.n_wires):
+            tqf.cnot(qdev, wires=[j, (j+1) % self.n_wires])
 
-        # Compute measurements
+        for j, ry in enumerate(self.ry1):
+            ry(qdev, wires=j)
+        
         if self.__qk:
             out = tq.expval(qdev, 0, tq.PauliZ())
             measurements = [out] * len(self.ops)
         else:
             measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
-
+        #measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
         out = torch.stack(measurements, dim=-1)
         return out.view(B, T, self.hidden_dim).float()
-
-    @abstractmethod
-    def apply_quantum_evolution(self, qdev: tq.QuantumDevice):
-        """
-        Abstract method to apply quantum operations.
-
-        Subclasses implement this to define their specific quantum evolution logic.
-
-        Args:
-            qdev (tq.QuantumDevice): Quantum device to operate on.
-        """
-        pass
-
-class ValueLayerSlow(ValueLayerBase):
-    """
-    Slow value layer for training with step-by-step quantum operations.
-
-    Applies gates individually, suitable for gradient computation.
-
-    Args:
-        n_wires (int): Number of qubits.
-        ops (list[str]): List of Pauli operators for measurement.
-        hidden_dim (int): Output dimension.
-        debug (bool): If True, enables debug mode (default: False).
-    """
-    def __init__(self, n_wires, ops, hidden_dim, debug = False, qk=True):
-        super().__init__(n_wires, ops, hidden_dim, debug, qk)
-
-    def apply_quantum_evolution(self, qdev: tq.QuantumDevice):
-        """
-        Applies quantum gates sequentially on the device.
-
-        Args:
-            qdev (tq.QuantumDevice): Quantum device to apply operations on.
-        """
-        # Apply RX and RY gates per wire
-        for j, (rx, ry) in enumerate(zip(self.rx0, self.ry0)):
-            rx(qdev, wires=j)
-            ry(qdev, wires=j)
-
-        # Apply CNOT gates in a ring topology
-        for j in range(self.n_wires):
-            tqf.cnot(qdev, wires=[j, (j + 1) % self.n_wires])
-
-        # Apply final RY gates
-        for j, ry in enumerate(self.ry1):
-            ry(qdev, wires=j)
-
-class ValueLayerFast(ValueLayerBase):
-    """
-    Fast value layer for inference with precomputed unitary evolution.
-
-    Uses a single unitary matrix application for efficiency.
-
-    Args:
-        n_wires (int): Number of qubits.
-        ops (list[str]): List of Pauli operators for measurement.
-        hidden_dim (int): Output dimension.
-        transformer_layer_id (int): Transformer layer identifier.
-        head_id (int): Attention head identifier.
-        debug (bool): If True, enables debug mode (default: False).
-    """
-    def __init__(self, n_wires: int, ops: list[str], hidden_dim: int, transformer_layer_id: int, head_id: int, debug: bool = False, qk=True):
-        super().__init__(n_wires, ops, hidden_dim, debug)
-        self.transformer_layer_id = transformer_layer_id
-        self.head_id = head_id
-        self.unitary_counter = 0
-        self.current_unitary_id = None
-
-    def _build_unitary(self, unitary_count: int, layer_id: str):
-        """
-        Builds and registers the unitary matrix for the quantum circuit.
-
-        Args:
-            unitary_count (int): Counter for unique unitary buffer names.
-            layer_id (str): Context identifier (e.g., 'q_fast').
-        """
-        n = self.n_wires
-        dim = 1 << n
-        device = self.rx0[0].params.device
-        U_total = torch.eye(dim, dtype=torch.complex64, device=device)
-
-        # Build unitary from RX and RY gates
-        for j in range(n):
-            rx_val = self.rx0[j].params.item()
-            ry_val = self.ry0[j].params
-            expanded_rx = expand_operator(rx_matrix(torch.tensor(rx_val, device=device)), [j], n).to(dtype=torch.complex64)
-            U_total = expanded_rx @ U_total
-            expanded_ry = expand_operator(ry_matrix(ry_val), [j], n).to(device=device, dtype=torch.complex64)
-            U_total = expanded_ry @ U_total
-
-        # Add CNOT gates
-        for j in range(n):
-            expanded_cnot = expand_operator(cnot_matrix(), [j, (j + 1) % n], n).to(device=device, dtype=torch.complex64)
-            U_total = expanded_cnot @ U_total
-
-        # Add final RY gates
-        for j in range(n):
-            ry1_val = self.ry1[j].params
-            expanded_ry1 = expand_operator(ry_matrix(ry1_val), [j], n).to(device=device, dtype=torch.complex64)
-            U_total = expanded_ry1 @ U_total
-
-        # Register unitary buffer with unique name
-        unique_name = f"layer{self.transformer_layer_id}_head{self.head_id}_{layer_id}_U{unitary_count}"
-        self.register_buffer(unique_name, U_total)
-        self.current_unitary_id = unique_name
-        self.unitary_counter += 1
-
-    def apply_quantum_evolution(self, qdev: tq.QuantumDevice):
-        """
-        Applies the precomputed unitary matrix to the quantum state.
-
-        Args:
-            qdev (tq.QuantumDevice): Quantum device to operate on.
-        """
-        if self.current_unitary_id is None:
-            raise ValueError("Unitary operator not built. Call _build_unitary first.")
-        U = getattr(self, self.current_unitary_id).to(device=qdev.states.device)
-        psi = qdev.states.view(qdev.bsz, *([2] * self.n_wires))
-        psi_out = tqf.apply_unitary_bmm(psi, U, list(range(self.n_wires)))
-        qdev.set_states(psi_out.view(qdev.bsz, -1))
