@@ -1,93 +1,163 @@
-# QSA for GPT-1: Structure, Training Details
+# Quantum Self‑Attention for GPT‑1<!-- omit in toc -->
 
-**Note:** During all experiments with GPT-1:
-- **2 epochs**, **1024 batch size**
-- **6 stacked multihead self-attentions (MHSA)**, each MHSA has only **1 head**.
-- **CSA** has a classical structure: a single `q/k/v` layer for all tokens.
+:scroll: [Paper](https://arxiv.org/abs/your-paper-id)  &nbsp; :computer: [Usage](#using-qsa-in-practice)  &nbsp; :books: [Related Projects](https://github.com/Nikait/QSA)
+
+**TL;DR:** We replace the classical self‑attention in GPT‑1 with a quantum‑inspired attention mechanism, achieving logarithmic compression of attention parameters and up to 5× inference speedups via precomputed unitaries.
+
+> [!TIP]
+> For a concise overview, see **Section Methods** (pp. X–Y) and **Fig. 1** in the [paper PDF](https://arxiv.org/pdf/your-paper-id.pdf).
+
+## Using QSA in Practice
+
+To integrate Quantum Self‑Attention (QSA) into your own GPT‑1 training or inference pipeline, you only need:
+
+- [`QSA.py`](QSA.py): the core QSA layer implementation, including both training (`slow`) and inference (`fast`) branches.
+- [`main.py`](main.py): end‑to‑end example for training and evaluation with Hydra-based configuration.
+- [`conf/config.py`](conf/config.py): default hyperparameters and setup.
+
+### Quick Install
+
+```bash
+pip3 install hydra-core torch torchtext numpy torchquantum
+pip3 install qiskit==0.46.2 qiskit-aer==0.13.3 qiskit-ignis==0.7.0 qiskit-terra==0.46.2
+```
+
+Then clone the repo or copy the relevant modules into your project:
+
+```bash
+git clone https://github.com/Nikait/QSA.git
+cd QSA
+``` 
+
+## Table of Contents
+
+- [Using QSA in Practice](#using-qsa-in-practice)
+  - [Quick Install](#quick-install)
+- [Table of Contents](#table-of-contents)
+- [Overview](#overview)
+  - [Key Components](#key-components)
+  - [Performance Highlights](#performance-highlights)
+- [Speed Comparison](#speed-comparison)
+  - [Training Speed](#training-speed)
+  - [Inference Speed](#inference-speed)
+- [Performance](#performance)
+- [Set Up Environment](#set-up-environment)
+  - [Software Dependencies](#software-dependencies)
+  - [Dataset Preparation](#dataset-preparation)
+- [Running the Code](#running-the-code)
+  - [Code Overview](#code-overview)
+  - [Training](#training)
+  - [Inference Speed‑up](#inference-speedup)
+- [Adding New Datasets](#adding-new-datasets)
 
 ---
 
-## QSA Original Version: Each Token Has Its Own `q/k/v` Layers
+## Overview
 
-**Number of parameters per a single self-attention layer:**
+This repository provides:
 
-| **CSA Parameters**                          | **QSA Parameters**                                      |
-|---------------------------------------------|---------------------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             |
+- **Quantum Self‑Attention (QSA)**: v1 and v2 implementations leveraging amplitude encoding and Pauli measurement for queries, keys, and values.
+- **GPT-1 Integration**: Drop‑in replacement of multi‑head self‑attention heads in the GPT‑1 architecture.
+- **Two Execution Modes**:
+  - **Slow (Training)**: Step‑by‑step quantum simulation with TorchQuantum.
+  - **Fast (Inference)**: Precomputed total unitary for rapid matrix‑vector application.
 
-**Training Setup:**
-- **Context size** = 16
-- **Embedding size** = 4
+### Key Components
 
-![Cross-entropy comparison: QSA vs CSA with embedding size = 4](https://github.com/user-attachments/assets/60e86311-bb46-4fff-b151-05c7a9c8ce49)
+| Module                     | Description                                      |
+| :------------------------- | :----------------------------------------------- |
+| `QSA.py`                   | Defines `QSA`, `ValueLayerSlow`, `ValueLayerFast` |
+| `main.py`                  | Training and evaluation launcher via Hydra        |
+| `conf/config.py`           | Experiment configurations (model, data, training) |
+| `model.py`                 | GPT-1 model wrapper integrating QSA layers        |
+| `dataset.py`               | Shakespeare dataset loader and tokenizer         |
+| `utils/`                   | Logging, metrics, and helper functions           |
 
-**Training Setup:**
-- **Context size** = 16
-- **Embedding size** = 16
+### Performance Highlights
 
-![Cross-entropy comparison: QSA vs CSA with embedding size = 16](https://github.com/user-attachments/assets/2aadbdb1-a0c7-49f3-adec-6bfd52da27f3)
+| Metric                 | CSA        | QSA v1             | QSA v2             |
+| :--------------------- | :--------- | :----------------- | :----------------- |
+| Parameter Count (per head) | 3×emb×hidden | 3×3×⌈log₂ emb⌉      | 3×3×⌈log₂ emb⌉      |
+| Inference Speed (T4)   | 1×         | 1×                 | 5× (fast branch)    |
+| Cross‑Entropy Loss     | baseline   | lower than CSA     | matches or improves |
+
+## Speed Comparison
+
+### Training / Inference Speed
+
+![Training / Inference Time per Batch](https://github.com/user-attachments/assets/4f3482b3-b00d-4295-bf65-acafd4322a96)
+
+*Figure X. Time per batch (batch size = 1024) on a single NVIDIA T4 GPU for CSA and different versions of QSA with embedding sizes {4, 16}. The fast inference variant achieves a 5x speed-up over the standard QSAv2 inference.*
+
+
+## Performance
+![Loss Curves (Embedding Size = 16)](https://github.com/user-attachments/assets/90f26ece-c8ca-4767-9670-e839efc04bee)
+
+*Figure Z. Cross‑entropy loss during training for embedding size 16, comparing CSA, QSA v0, QSA v1, and QSA v2.*
+
+## Set Up Environment
+
+### Software Dependencies
+
+Tested on **Ubuntu 22.04**, Python 3.10+:
+
+```bash
+pip3 install qiskit==0.46.2 qiskit-aer==0.13.3 qiskit-ibm-provider==0.10.0 qiskit-ibm-runtime==0.20.0 qiskit-ibmq-provider==0.19.0 qiskit-ignis==0.7.0 qiskit-terra==0.46.2 
+pip3 install hydra-core torchquantum
+```
+
+> **Note:** For GPU acceleration, install a CUDA‑enabled PyTorch build.
+
+### Dataset Preparation
+
+1. Download the Shakespeare text dataset from Kaggle:
+   ```bash
+   mkdir -p data && cd data
+   wget https://www.kaggle.com/datasets/adarshpathak/shakespeare-text/download -O shakespeare.txt
+   ```
+2. Ensure `conf/config.py` points to `data/shakespeare.txt` and `char_level` tokenizer.
+
+
+
+## Running the Code
+
+### Code Overview
+
+| Script / Module      | Function                                        |
+| :------------------- | :---------------------------------------------- |
+| `main.py`            | Launches training or evaluation via Hydra       |
+| `model.py`           | GPT‑1 with QSA layer definition                 |
+| `QSA.py`             | QSA layer implementation                        |
+| `dataset.py`         | Data loading and tokenization                   |
+| `utils.py`           | Miscellaneous helpers                           |
+| `conf/config.py`     | Configuration for optimization, datasets.       |
+
+### Training
+
+Run a single training experiment with your config:
+
+```bash
+python3 main.py
+```
+
+Outputs (loss) will be saved under `logs.txt/`.
+Also you may add checkpoint saver by editing conf/config.py
+
+
+### Inference Speed‑up
+
+When `mode=eval`, QSA automatically precomputes unitaries on first pass, yielding
+ up to 5× speed‑up on GPU.
+
+## Adding New Datasets
+
+To add your own dataset, update `src/dataset.py` and the Hydra configs:
+
+1. Place your text files under `data/`.
+2. Add dataset path and tokenizer in `conf/config.py`.
+3. Ensure vocabulary and encoding match GPT‑1 embedding size.
 
 
 ---
-
-## QSA Fixed Version: A Single `q/k/v` Layer for All Tokens
-
-**Number of parameters per a single self-attention layer:**
-
-| **CSA Parameters**                          | **Original QSA Parameters**                                 | **Fixed QSA Parameters**                         |
-|---------------------------------------------|-------------------------------------------------------------|--------------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             | `3 x 3 × ⌈log₂(embedding_size)⌉`                 |
-
-**Training Setup:**
-- **Context size** = 16
-- **Embedding size** = 4
-
-![Cross-entropy comparison: Original QSA vs Fixed QSA vs CSA with embedding size = 4](https://github.com/user-attachments/assets/46031a83-8881-481f-907c-9b986d77c90b)
-
-
-**Training Setup:**
-- **1 epoch**
-- **Context size** = 16
-- **Embedding size** = 16
-
-![Cross-entropy comparison: Original QSA vs Fixed QSA vs CSA with embedding size = 16](https://github.com/user-attachments/assets/b5908d27-ae87-4ee5-a138-71b02e2536fc)
-
-## Changing the QK normalization
-The origianl paper proposed the plain averaging:
-
-
-![image](https://github.com/user-attachments/assets/06adef59-0773-44f2-9168-2c849f906c2a)
-
-
-Changed to the softmaxing, become slightly worse:
-
-**Training Setup:**
-- **Context size** = 16
-- **Embedding size** = 4
-
-![image](https://github.com/user-attachments/assets/ba845d79-e38a-47d6-8e53-bb1304725086)
-
-## QSA Fixedv2: Changing the Q/K layer structure like the V structure: obtain hidden size diffrent measurements instead of repeating 1 measurement
-
-Gives slightly worse cross-entropy than the original QSA, but uses the logarithmically fewer parameters
-
-Also, because of multiple measurements it works slightly longer than orinal QSA (44 mins/epoch for the fixedv2 vs 38 mins/epoch on the T4 GPU)
-
-This version also has the same parameters number as the previous Fixed version
-
-**The whole table of the number of parameters**
-
-| **CSA Parameters**                          | **Original QSA Parameters**                                 | **Fixed QSA Parameters**                         | **Fixedv2 QSA Parameters**                       |
-|---------------------------------------------|-------------------------------------------------------------|--------------------------------------------------|--------------------------------------------------|
-| `3 × embedding_size × hidden_size`          | `3 × 3 x ⌈log₂(embedding_size)⌉ × context_size`             | `3 × 3 x ⌈log₂(embedding_size)⌉`                 | `3 × 3 x ⌈log₂(embedding_size)⌉`                 |
-
-
-**Training Setup:**
-- **Context size** = 16
-- **Embedding size** = 4
-- Also the softmaxing was used instead of simple averaging
-
-![image](https://github.com/user-attachments/assets/5b7e57e4-67d3-4ce2-b1d4-14258aa215d5)
-
 
 
