@@ -9,6 +9,15 @@ import torchquantum.functional as tqf
 from torchquantum.measurement import expval_joint_analytical
 import random
 
+def pauli_matrix(op: str) -> torch.Tensor:
+    mapping = {
+        'I': torch.eye(2, dtype=torch.complex64),
+        'X': torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64),
+        'Y': torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64),
+        'Z': torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64)
+    }
+    return mapping[op]
+
 def rx_matrix(theta: float) -> torch.Tensor:
     """
     Returns the RX rotation matrix for a given angle.
@@ -89,28 +98,7 @@ def expand_operator(gate: torch.Tensor, target_qubits: list, n: int) -> torch.Te
             U_full[new_i, i] = gate[j, sub_index]
     return U_full
 
-# ----------------- Quantum Self-Attention Layer -----------------
-
 class QSA(nn.Module):
-    """
-    Quantum Self-Attention layer.
-
-    The constructor now takes two additional parameters:
-      - layer_id: the unique transformer layer number
-      - head_id: the head index within that layer
-
-    These parameters are used to generate unique names for the unitary (U) matrices.
-
-    Args:
-        n_embed (int): Embedding dimension.
-        n_context (int): Context length (number of tokens).
-        head_size (int): Number of measurement outcomes per head.
-        layer_id (int): Unique transformer layer number.
-        head_id (int): Head index within the transformer layer.
-    
-    Returns:
-        QSA: An instance of the quantum self-attention layer.
-    """
     def __init__(
         self, 
         n_embed: int, 
@@ -118,11 +106,34 @@ class QSA(nn.Module):
         head_size: int, 
         layer_id: int, 
         head_id: int,
-        version=2
+        version=3
     ):
-        super().__init__()
-        assert version in [1, 2], "the version of the QSA has to be equal 1 or 2"
+        """
+        Quantum Self-Attention layer.
 
+        The constructor now takes two additional parameters:
+        - layer_id: the unique transformer layer number
+        - head_id: the head index within that layer
+
+        These parameters are used to generate unique names for the unitary (U) matrices.
+
+        Args:
+            n_embed (int): Embedding dimension.
+            n_context (int): Context length (number of tokens).
+            head_size (int): Number of measurement outcomes per head.
+            layer_id (int): Unique transformer layer number.
+            head_id (int): Head index within the transformer layer.
+        
+        Returns:
+            QSA: An instance of the quantum self-attention layer.
+        """
+
+        super().__init__()
+        assert version in [1, 2, 3], "version must be 1, 2 or 3"
+        
+        print(f"Instantiate QSA v{version} for the head {head_id}")
+
+        self.version = version
         self.__use_kv_one_measurement = True if version == 1 else False
         self.__precomputed = False
         self.head_size = head_size
@@ -134,18 +145,25 @@ class QSA(nn.Module):
         self.ops = [self.choose_op() for _ in range(self.head_size)]
         print(f"Generated Pauli strings for layer {layer_id} head {head_id}: ", self.ops)
         
-        # Fast branch for inference - pass both identifiers
-        self.q_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
+        if version != 3:
+            self.q_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
                                      self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
-        self.k_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
+            self.k_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
                                      self.transformer_layer_id, self.head_id, qk=self.__use_kv_one_measurement)
+            self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
+            self.k_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
+        
+        else:
+            self.q_linear = nn.Linear(n_embed, head_size)
+            self.k_linear = nn.Linear(n_embed, head_size)
+        
         self.v_fast = ValueLayerFast(self.n_wires, self.ops, self.head_size,
                                      self.transformer_layer_id, self.head_id)
-        
-        # Slow branch for training
-        self.q_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
-        self.k_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size, qk=self.__use_kv_one_measurement)
         self.v_slow = ValueLayerSlow(self.n_wires, self.ops, self.head_size)
+
+        # Slow branch for training
+        
+
         self.unitary_count = 0
 
     def choose_op(self) -> str:
@@ -180,10 +198,15 @@ class QSA(nn.Module):
         """
         B, T, C = x.shape
         qdev = tq.QuantumDevice(n_wires=self.n_wires, bsz=B * T, device=x.device)
-    
-        q = self.q_slow(x, qdev)
-        k = self.k_slow(x, qdev)
+
+        if self.version == 3:
+            q = self.q_linear(x)
+            k = self.k_linear(x)
+        else:
+            q = self.q_slow(x, qdev)
+            k = self.k_slow(x, qdev)
         v = self.v_slow(x, qdev)
+
         q = q.unsqueeze(2)
         k = k.unsqueeze(1)
         alpha = torch.exp(-((q - k) ** 2).sum(dim=-1))
@@ -202,9 +225,14 @@ class QSA(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (B, T, head_size) after applying quantum self-attention.
         """
-        q = self.q_fast(x)
-        k = self.k_fast(x)
+        if self.version == 3:
+            q = self.q_linear(x)
+            k = self.k_linear(x)
+        else:
+            q = self.q_fast(x)
+            k = self.k_fast(x)
         v = self.v_fast(x)
+
         q = q.unsqueeze(2)
         k = k.unsqueeze(1)
         alpha = torch.exp(-((q - k) ** 2).sum(dim=-1))
@@ -238,36 +266,45 @@ class QSA(nn.Module):
         from the slow branch. The unitary matrices are given unique names based on the transformer
         layer and head identifiers.
 
+        Then precomputes observables as O' = <psi| U^dagger O U |psi>
+        
         Returns:
             None
         """
         super().eval()
-        print("[INFO] Switching to inference mode. Starting precomputation of unitaries...")
-        # Copy parameters from the slow branch to the fast branch
-        self.q_fast.rx0_params = self.q_slow.rx0
-        self.q_fast.ry0_params = self.q_slow.ry0
-        self.q_fast.ry1_params = self.q_slow.ry1
+        # Copy parameters from slow to fast for quantum parts
+        if self.version != 3:
+            self.q_fast.rx0_params = self.q_slow.rx0
+            self.q_fast.ry0_params = self.q_slow.ry0
+            self.q_fast.ry1_params = self.q_slow.ry1
 
-        self.k_fast.rx0_params = self.k_slow.rx0
-        self.k_fast.ry0_params = self.k_slow.ry0
-        self.k_fast.ry1_params = self.k_slow.ry1
-
+            self.k_fast.rx0_params = self.k_slow.rx0
+            self.k_fast.ry0_params = self.k_slow.ry0
+            self.k_fast.ry1_params = self.k_slow.ry1
+        
         self.v_fast.rx0_params = self.v_slow.rx0
         self.v_fast.ry0_params = self.v_slow.ry0
         self.v_fast.ry1_params = self.v_slow.ry1
 
-        # Build unitary operators with unique names that include the transformer layer and head numbers
-        self.q_fast._build_unitary(self.unitary_count, layer_id="q_fast", 
-                                   transformer_layer_id=self.transformer_layer_id, head_id=self.head_id)
-        self.unitary_count += 1
-        self.k_fast._build_unitary(self.unitary_count, layer_id="k_fast", 
-                                   transformer_layer_id=self.transformer_layer_id, head_id=self.head_id)
-        self.unitary_count += 1
-        self.v_fast._build_unitary(self.unitary_count, layer_id="v_fast", 
-                                   transformer_layer_id=self.transformer_layer_id, head_id=self.head_id)
+
+        # Build unitaries
+        if self.version != 3:
+            self.q_fast._build_unitary(self.unitary_count, "q_fast", self.transformer_layer_id, self.head_id)
+            self.unitary_count += 1
+            self.k_fast._build_unitary(self.unitary_count, "k_fast", self.transformer_layer_id, self.head_id)
+            self.unitary_count += 1
+        self.v_fast._build_unitary(self.unitary_count, "v_fast", self.transformer_layer_id, self.head_id)
+
+        print("[INFO] Precomputation of Unitaries completed.")
+
+        self.v_fast.precompute_observables(self.unitary_count, "v_fast", self.transformer_layer_id, self.head_id)
+
+        print("[INFO] Precomputation of observables completed.")
+
         self.unitary_count += 1
 
-        print("[INFO] Precomputation completed. Fast branch matrices updated.")
+        
+
 
 # ----------------- Fast Branch: ValueLayerFast -----------------
 
@@ -304,7 +341,11 @@ class ValueLayerFast(nn.Module):
         self.ry1_params = tq.QuantumModuleList([tq.RY(has_params=True, trainable=True) for _ in range(n_wires)])
 
         dim = 1 << self.n_wires
+        
         self.register_buffer('U', torch.eye(dim, dtype=torch.complex64))
+        # list of precomputed O' matrices
+        self.obs_primes = nn.ParameterList([nn.Parameter(torch.zeros((dim, dim), dtype=torch.complex64), requires_grad=False)
+                                            for _ in range(self.hidden_dim)])
         self.unitary_counter = 0
         self.current_unitary_id = None
 
@@ -357,6 +398,28 @@ class ValueLayerFast(nn.Module):
         self.current_unitary_id = unique_name
         # Uncomment the following line for additional logging if needed:
         # print(f"[INFO] Built operator {unique_name} for {layer_id}")
+    
+    def precompute_observables(self, unitary_count: int, layer_id: str, transformer_layer_id: int, head_id: int):
+        # compute O' = U O U^dagger for each op
+        unique_name = f"layer{transformer_layer_id}_head{head_id}_{layer_id}_U{unitary_count}"
+        if hasattr(self, unique_name):
+            U = getattr(self, unique_name).to(dtype=torch.complex64)
+        else:
+            print(f"There is no precomputed U for layer{transformer_layer_id}_head{head_id}_{layer_id}_U{unitary_count}")
+            return
+
+        
+        U_dag = U.conj().t()
+        for idx, op in enumerate(self.ops):
+            # build observable O
+            mats = [pauli_matrix(c) for c in op]
+            O = mats[0]
+            for m in mats[1:]:
+                O = torch.kron(O, m)
+            # compute: O' = U^dagger @ O @ U
+            O_prime = U_dag @ O.to(U.device) @ U
+
+            self.obs_primes[idx].data.copy_(O_prime)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -380,28 +443,19 @@ class ValueLayerFast(nn.Module):
         base_states[:, 0] = 1.0
         qdev.set_states(base_states)
         self.encoding(qdev, x_flat)
-        psi = qdev.states.reshape(B * T, -1).to(device=device, dtype=torch.complex64)
-        psi_reshaped = psi.view(B * T, *([2] * self.n_wires))
+        psi = qdev.states.view(B*T, dim)
 
-        if self.current_unitary_id is None:
-            raise ValueError("Unitary operator has not been built. Please call _build_unitary first.")
-        U = getattr(self, self.current_unitary_id).to(device=device, dtype=torch.complex64)
-        # Uncomment the following line for additional logging if needed:
-        # print(f"[INFO] Using operator {self.current_unitary_id} in forward pass.")
+        # measure using precomputed observables
+        # <psi|O'|psi> = (psi* . (O' psi)).sum(dim=-1)
+        exps = []
+        for O_prime in self.obs_primes:
+            h_psi = torch.mm(O_prime, psi.T).transpose(0, 1)
+            # expectation: (psi* * h_psi).sum over state-index
+            exp = (psi.conj() * h_psi).sum(-1).real
+            exps.append(exp)
+        out = torch.stack(exps, dim=-1)  # (B*T, hidden_dim)
+        return out.view(B, T, self.hidden_dim)
 
-        psi_out = tqf.apply_unitary_bmm(psi_reshaped, U, list(range(self.n_wires)))
-        psi_out = psi_out.view(B * T, -1)
-        qdev.set_states(psi_out)
-        qdev.states = qdev.states.to(device=device, dtype=torch.complex64)
-
-        if self.__qk:
-            out = tq.expval(qdev, 0, tq.PauliZ())
-            measurements = [out] * len(self.ops)
-        else:
-            measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
-        #measurements = [expval_joint_analytical(qdev, op) for op in self.ops]
-        out = torch.stack(measurements, dim=-1)
-        return out.view(B, T, self.hidden_dim).float()
 
 # ------------------ Slow Branch: ValueLayerSlow ------------------
 
