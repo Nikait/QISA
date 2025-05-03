@@ -400,7 +400,7 @@ class ValueLayerFast(nn.Module):
         # print(f"[INFO] Built operator {unique_name} for {layer_id}")
     
     def precompute_observables(self, unitary_count: int, layer_id: str, transformer_layer_id: int, head_id: int):
-        # compute O' = U O U^dagger for each op
+        # compute O' = U^dagger @ O @ U for each observable O
         unique_name = f"layer{transformer_layer_id}_head{head_id}_{layer_id}_U{unitary_count}"
         if hasattr(self, unique_name):
             U = getattr(self, unique_name).to(dtype=torch.complex64)
