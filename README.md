@@ -1,8 +1,8 @@
-# Quantum Self‑Attention for GPT‑1<!-- omit in toc -->
+# Quantum-Inspired Self-Attention in a Large Language Model<!-- omit in toc -->
 
-:scroll: [Paper](https://arxiv.org/abs/your-paper-id)  &nbsp; :computer: [Usage](#using-qsa-in-practice)  &nbsp; :books: [Related Projects](https://github.com/Nikait/QSA)
+:scroll: [Paper](https://arxiv.org/abs/your-paper-id)  &nbsp; :computer: [Usage](#using-qsa-in-practice)  &nbsp; :books: [Related Projects](https://github.com/Nikait/QISA)
 
-**TL;DR:** We replace the classical self‑attention in GPT‑1 with a quantum‑inspired attention mechanism, achieving logarithmic compression of attention parameters and up to 5× inference speedups via precomputed unitaries.
+**TL;DR:** We replace the classical self‑attention in GPT‑1 with a quantum‑inspired attention mechanism, achieving logarithmic compression of some attention layer, approx eight times lower cross-entropy loss compared to standard self-attention, and only a ~2.1 longer inference time.
 
 > [!TIP]
 > For a concise overview, see **Section Methods** (pp. X–Y) and **Fig. 1** in the [paper PDF](https://arxiv.org/pdf/your-paper-id.pdf).
@@ -73,13 +73,14 @@ This repository provides:
 | `dataset.py`               | Shakespeare dataset loader and tokenizer         |
 | `utils/`                   | Logging, metrics, and helper functions           |
 
+
 ### Performance Highlights
 
-| Metric                 | CSA        | QSA v1             | QSA v2             |
-| :--------------------- | :--------- | :----------------- | :----------------- |
-| Parameter Count (per head) | 3×emb×hidden | 3×3×⌈log₂ emb⌉      | 3×3×⌈log₂ emb⌉      |
-| Inference Speed (T4)   | 1×         | 1×                 | 5× (fast branch)    |
-| Cross‑Entropy Loss     | baseline   | lower than CSA     | matches or improves |
+| Metric                  | CSA          | QISA v2          | QISA v3           | AQSA v3 (w/ precomp)               |
+| ----------------------- | ------------ | ---------------- | ----------------- | ---------------------------------- |
+| Params per head         | 3×d×dₕ       | O(log d)         | 2×dₕ + O(log d)    | same as QISA v3                    |
+| Inference Time (T4 GPU) | 1×           | 5×               | 2.1×              | 2.1× (with 22.3× speed vs. QISA v2) |
+| Cross‑Entropy Loss      | baseline     | improves         | improves          | improves                           |
 
 ## Speed Comparison
 
@@ -121,16 +122,6 @@ pip3 install hydra-core torchquantum
 
 ## Running the Code
 
-### Code Overview
-
-| Script / Module      | Function                                        |
-| :------------------- | :---------------------------------------------- |
-| `main.py`            | Launches training or evaluation via Hydra       |
-| `model.py`           | GPT‑1 with QSA layer definition                 |
-| `QSA.py`             | QSA layer implementation                        |
-| `dataset.py`         | Data loading and tokenization                   |
-| `utils.py`           | Miscellaneous helpers                           |
-| `conf/config.py`     | Configuration for optimization, datasets.       |
 
 ### Training
 
@@ -144,20 +135,7 @@ Outputs (loss) will be saved under `logs.txt/`.
 Also you may add checkpoint saver by editing conf/config.py
 
 
-### Inference Speed‑up
-
-When `mode=eval`, QSA automatically precomputes unitaries on first pass, yielding
- up to 5× speed‑up on GPU.
-
-## Adding New Datasets
-
-To add your own dataset, update `src/dataset.py` and the Hydra configs:
-
-1. Place your text files under `data/`.
-2. Add dataset path and tokenizer in `conf/config.py`.
-3. Ensure vocabulary and encoding match GPT‑1 embedding size.
-
-
 ---
+
 
 
