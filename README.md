@@ -38,8 +38,7 @@ cd QSA
   - [Key Components](#key-components)
   - [Performance Highlights](#performance-highlights)
 - [Speed Comparison](#speed-comparison)
-  - [Training Speed](#training-speed)
-  - [Inference Speed](#inference-speed)
+  - [Training / Inference Speed](#training-speed)
 - [Performance](#performance)
 - [Set Up Environment](#set-up-environment)
   - [Software Dependencies](#software-dependencies)
@@ -47,8 +46,6 @@ cd QSA
 - [Running the Code](#running-the-code)
   - [Code Overview](#code-overview)
   - [Training](#training)
-  - [Inference Speed‑up](#inference-speedup)
-- [Adding New Datasets](#adding-new-datasets)
 
 ---
 
@@ -78,8 +75,8 @@ This repository provides:
 
 | Metric                  | CSA          | QISA v2          | QISA v3           | AQSA v3 (w/ precomp)               |
 | ----------------------- | ------------ | ---------------- | ----------------- | ---------------------------------- |
-| Params per head         | 3×d×dₕ       | O(log d)         | 2×dₕ + O(log d)    | same as QISA v3                    |
-| Inference Time (T4 GPU) | 1×           | 5×               | 2.1×              | 2.1× (with 22.3× speed vs. QISA v2) |
+| Params per head         | 3×d×dₕ       | O(log d)         | 2×d×dₕ + O(log d)  | 2×d×dₕ + O(log d)                  |
+| Inference Time (T4 GPU) | 1×           | 46.7×            | 8.9×              | 2.1× (with 22.3× speed vs. QISA v2)|
 | Cross‑Entropy Loss      | baseline     | improves         | improves          | improves                           |
 
 ## Speed Comparison
