@@ -85,15 +85,15 @@ This repository provides:
 
 ### Training / Inference Speed
 
-![Training / Inference Time per Batch](https://github.com/user-attachments/assets/4f3482b3-b00d-4295-bf65-acafd4322a96)
+![Training / Inference Time per Batch](https://github.com/user-attachments/assets/95094ce5-47b1-4366-9c2a-557fe7f2f81d)
 
-*Figure X. Time per batch (batch size = 1024) on a single NVIDIA T4 GPU for CSA and different versions of QSA with embedding sizes {4, 16}. The fast inference variant achieves a 5x speed-up over the standard QSAv2 inference.*
+*Figure 1. Time per batch (batch size = 1024) on a single NVIDIA T4 GPU for CSA and different versions of QSA with embedding sizes $\{4, 16\}$. The fastest inference variant with unitaries and observables precomputation at QSAv3 achieves a 22.3$\times$ speed-up over the standard QSAv2 inference.*
 
 
 ## Performance
-![Loss Curves (Embedding Size = 16)](https://github.com/user-attachments/assets/90f26ece-c8ca-4767-9670-e839efc04bee)
+![loss](https://github.com/user-attachments/assets/23dbb511-da43-4224-af58-497d3062e313)
 
-*Figure Z. Cross‑entropy loss during training for embedding size 16, comparing CSA, QSA v0, QSA v1, and QSA v2.*
+*Figure 2. Training cross-entropy loss: CSA vs. QISA. Setup: 1 epoch, batch size = 128, 1 head, context length = 16, embedding size = 128, 7 qubits.*
 
 ## Set Up Environment
 
