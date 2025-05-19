@@ -82,11 +82,11 @@ This repository provides:
 
 Tested on **Ubuntu 22.04**, Python 3.10+:
 
-bash
+```bash
 git clone https://github.com/Nikait/QISA.git
 cd QISA
 pip3 install requirements.txt
-
+```
 
 
 > **Note:** For GPU acceleration, install a CUDA‑enabled PyTorch build.
@@ -96,10 +96,10 @@ pip3 install requirements.txt
 1. Download the Shakespeare text dataset from Kaggle:
    
 
-bash
+```bash
    mkdir -p data && cd data
    wget https://www.kaggle.com/datasets/adarshpathak/shakespeare-text/download -O shakespeare.txt
-
+```
 
 2. Ensure conf/config.py points to data/shakespeare.txt and char_level tokenizer.
 
@@ -112,9 +112,9 @@ bash
 
 Run a single training experiment with your config:
 
-bash
+```bash
 python3 main.py
-
+```
 
 
 Outputs (loss) will be saved under logs.txt/.
