@@ -15,26 +15,11 @@ To integrate Quantum Self‑Attention (QSA) into your own GPT‑1 training or in
 - [main.py](main.py): end‑to‑end example for training and evaluation with Hydra-based configuration.
 - [conf/config.py](conf/config.py): default hyperparameters and setup.
 
-### Quick Install
 
-bash
-pip3 install hydra-core torch torchtext numpy torchquantum
-pip3 install qiskit==0.46.2 qiskit-aer==0.13.3 qiskit-ignis==0.7.0 qiskit-terra==0.46.2
-
-
-
-Then clone the repo or copy the relevant modules into your project:
-
-bash
-git clone https://github.com/Nikait/QSA.git
-cd QSA
-
- 
 
 ## Table of Contents
 
 - [Using QSA in Practice](#using-qsa-in-practice)
-  - [Quick Install](#quick-install)
 - [Table of Contents](#table-of-contents)
 - [Overview](#overview)
   - [Key Components](#key-components)
@@ -98,8 +83,9 @@ This repository provides:
 Tested on **Ubuntu 22.04**, Python 3.10+:
 
 bash
-pip3 install qiskit==0.46.2 qiskit-aer==0.13.3 qiskit-ibm-provider==0.10.0 qiskit-ibm-runtime==0.20.0 qiskit-ibmq-provider==0.19.0 qiskit-ignis==0.7.0 qiskit-terra==0.46.2 
-pip3 install hydra-core torchquantum
+git clone https://github.com/Nikait/QISA.git
+cd QISA
+pip3 install requirements.txt
 
 
 
