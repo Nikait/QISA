@@ -52,13 +52,52 @@ class MultiHeadSelfAttention(nn.Module):
         return out
 
 class SingleHead(nn.Module):
-    def __init__(self, hidden_dim: int, n_embed: int, block_size: int, layer_id: int, head_id: int, dropout: float=0.2):
-        super(SingleHead, self).__init__()
-        self.qsa = QSA(n_embed, block_size, hidden_dim, layer_id, head_id)
+    def __init__(
+        self,
+        hidden_dim: int,
+        n_embed: int,
+        block_size: int,
+        layer_id: int,
+        head_id: int,
+        dropout: float = 0.2,
+        use_qsa: bool = True,
+    ):
+        super().__init__()
+        self.use_qsa = use_qsa
+        if self.use_qsa:
+            self.qsa = QSA(n_embed, block_size, hidden_dim, layer_id, head_id)
+        else:
+            self.to_q = nn.Linear(n_embed, hidden_dim, bias=False)
+            self.to_k = nn.Linear(n_embed, hidden_dim, bias=False)
+            self.to_v = nn.Linear(n_embed, hidden_dim, bias=False)
+            self.proj = nn.Linear(hidden_dim, n_embed, bias=False)
+            self.attn_dropout = nn.Dropout(dropout)
+            self.proj_dropout = nn.Dropout(dropout)
+            mask = torch.tril(torch.ones(block_size, block_size)).unsqueeze(0)
+            self.register_buffer("causal_mask", mask)
+            self.scale = 1.0 / (hidden_dim) ** 0.5
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.qsa(x)
+        if self.use_qsa:
+            return self.qsa(x)
+        B, T, C = x.shape
+        q = self.to_q(x)
+        k = self.to_k(x)
+        v = self.to_v(x)
+        scores = torch.matmul(q, k.transpose(-2, -1))
+        scores = scores * self.scale
+        if self.causal_mask.size(-1) < T:
+            mask = torch.tril(torch.ones(T, T, device=x.device)).unsqueeze(0)
+        else:
+            mask = self.causal_mask[:, :T, :T].to(x.device)
+        scores = scores.masked_fill(mask == 0, float("-inf"))
+        attn = torch.softmax(scores, dim=-1)
+        attn = self.attn_dropout(attn)
+        out = torch.matmul(attn, v)
+        out = self.proj(out)
+        out = self.proj_dropout(out)
         return out
+
 
 class GPT(nn.Module):
     def __init__(self, vocab_size: int, block_size: int, n_embed: int, num_heads: int, n_layers: int):
