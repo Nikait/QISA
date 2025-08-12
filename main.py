@@ -35,7 +35,7 @@ def train_epoch(loader: torch.utils.data.DataLoader, model: nn.Module, criterion
         batch_times.append(batch_time)
         loss.backward()
         optimizer.step()
-        if i % 10 == 0:
+        if i % 100 == 0:
             print(f"Batch {i:4d}: Current Loss = {loss.item():.4f}")
     avg_loss = torch.mean(losses)
     avg_time = sum(batch_times) / len(batch_times)
@@ -43,6 +43,7 @@ def train_epoch(loader: torch.utils.data.DataLoader, model: nn.Module, criterion
     with open("logs.txt", "a") as f:
          f.write(str(losses.tolist()[:i+1]) + "\n")
     return avg_loss
+
 
 
 @torch.inference_mode()
@@ -79,35 +80,47 @@ def test_epoch(loader, model, criterion, optimizer, device, idx_to_char):
             all_preds.append(pred_text)
             all_targets.append(target_text)
 
-
-
         end_time = time.time()
         batch_time = end_time - start_time
         batch_times.append(batch_time)
 
-    # Compute metrics
+    # Compute per-sequence metrics
     cer_scores = [
         editdistance.eval(p, t) / len(t) if len(t) > 0 else 0
         for p, t in zip(all_preds, all_targets)
     ]
-    avg_cer = sum(cer_scores) / len(cer_scores)
-
     wer_scores = [wer(t, p) for p, t in zip(all_preds, all_targets)]
-
-    avg_wer = sum(wer_scores) / len(wer_scores)
-
     smoothie = SmoothingFunction().method1
     bleu_scores = [
         sentence_bleu([t.split()], p.split(), smoothing_function=smoothie)
         for p, t in zip(all_preds, all_targets)
     ]
-    avg_bleu = sum(bleu_scores) / len(bleu_scores)
 
-    avg_loss = torch.mean(losses)
+    # Compute mean and std
+    avg_loss = losses.mean().item()
+    std_loss = losses.std(unbiased=False).item()
+
+    avg_cer = sum(cer_scores) / len(cer_scores)
+    std_cer = (sum((c - avg_cer) ** 2 for c in cer_scores) / len(cer_scores)) ** 0.5
+
+    avg_wer = sum(wer_scores) / len(wer_scores)
+    std_wer = (sum((w - avg_wer) ** 2 for w in wer_scores) / len(wer_scores)) ** 0.5
+
+    avg_bleu = sum(bleu_scores) / len(bleu_scores)
+    std_bleu = (sum((b - avg_bleu) ** 2 for b in bleu_scores) / len(bleu_scores)) ** 0.5
+
     avg_time = sum(batch_times[1:]) / len(batch_times[1:])
 
-    print(f"Average Loss: {avg_loss:.4f}, CER: {avg_cer:.4f}, WER: {avg_wer:.4f}, BLEU: {avg_bleu:.4f}, Avg Batch Time: {avg_time:.4f}s")
+    print(f"Loss: mean={avg_loss:.4f}, std={std_loss:.4f}")
+    print(f"CER : mean={avg_cer:.4f}, std={std_cer:.4f}")
+    print(f"WER : mean={avg_wer:.4f}, std={std_wer:.4f}")
+    print(f"BLEU: mean={avg_bleu:.4f}, std={std_bleu:.4f}")
+    print(f"Avg Batch Time: {avg_time:.4f}s")
+
     return avg_loss, avg_cer, avg_wer, avg_bleu
+
+
+
 
 
 @hydra.main(config_name="config", version_base=None)
