@@ -1,6 +1,6 @@
 # Quantum-Inspired Self-Attention in a Large Language Model<!-- omit in toc -->
 
-:scroll: [Paper](https://arxiv.org/abs/your-paper-id)  &nbsp; :computer: [Usage](#using-qsa-in-practice)  &nbsp; :books: [Related Projects](https://github.com/Nikait/QISA)
+:scroll: [Arxiv](https://arxiv.org/abs/2603.03318)  &nbsp; :computer: [Usage](#using-qsa-in-practice)  &nbsp; :books: [Related Projects](https://github.com/Nikait/QISA)
 
 **TL;DR:** We replace the classical self‑attention in GPT‑1 with a quantum‑inspired attention mechanism, achieving logarithmic compression of some attention layer, approx eight times lower cross-entropy loss compared to standard self-attention, and only a ~2.1 longer inference time.
 
