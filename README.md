@@ -116,3 +116,20 @@ python3 main.py
 
 Outputs (loss) will be saved under logs.txt/.
 Also you may add checkpoint saver by editing conf/config.py
+
+
+## Citation
+
+If you would like to cite us, please consider following form:
+
+```bib
+@misc{kuznetsov2026quantuminspiredselfattentionlargelanguage,
+      title={Quantum-Inspired Self-Attention in a Large Language Model}, 
+      author={Nikita Kuznetsov and Niyaz Ismagilov and Ernesto Campos},
+      year={2026},
+      eprint={2603.03318},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2603.03318}, 
+}
+```
