@@ -4,9 +4,6 @@
 
 **TL;DR:** We replace the classical self‑attention in GPT‑1 with a quantum‑inspired attention mechanism, achieving logarithmic compression of some attention layer, approx eight times lower cross-entropy loss compared to standard self-attention, and only a ~2.1 longer inference time.
 
-> [!TIP]
-> For a concise overview, see **Section Methods** (pp. X–Y) and **Fig. 1** in the [paper PDF](https://arxiv.org/pdf/your-paper-id.pdf).
-
 ## Using QSA in Practice
 
 To integrate Quantum Self‑Attention (QSA) into your own GPT‑1 training or inference pipeline, you only need:
